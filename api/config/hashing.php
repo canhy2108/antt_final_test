@@ -15,7 +15,9 @@ return [
     |
     */
 
-    'driver' => 'bcrypt',
+    // SECURITY: Argon2id is the modern PHC winner — memory-hard, resistant to GPU/ASIC attacks.
+    // Falls back to bcrypt only if PHP doesn't support Argon2id.
+    'driver' => env('HASH_DRIVER', 'argon2id'),
 
     /*
     |--------------------------------------------------------------------------
@@ -29,7 +31,8 @@ return [
     */
 
     'bcrypt' => [
-        'rounds' => env('BCRYPT_ROUNDS', 10),
+        // SECURITY: rounds 12 = ~250ms on modern CPU; tune up if you have fast hardware
+        'rounds' => env('BCRYPT_ROUNDS', 12),
     ],
 
     /*
@@ -43,10 +46,15 @@ return [
     |
     */
 
+    // SECURITY: Argon2id parameters (OWASP recommended)
+    // memory: 64MB, threads: 4, time: 4 iterations → ~500ms on modern server
     'argon' => [
-        'memory' => 65536,
-        'threads' => 1,
-        'time' => 4,
+        'memory' => env('ARGON_MEMORY', 65536),  // KB
+        'threads' => env('ARGON_THREADS', 4),
+        'time' => env('ARGON_TIME', 4),
     ],
+
+    // Rehash on next login if work factor outdated
+    'rehash_on_login' => true,
 
 ];

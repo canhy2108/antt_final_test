@@ -1,0 +1,104 @@
+# Extended docker-compose.yml with security enhancements
+# Use with: docker-compose -f docker-compose.yml -f docker-compose.secure.yml up
+
+version: '3.8'
+
+services:
+  nginx:
+    # Rebuild with SSL support
+    build:
+      context: .
+      dockerfile: nginx/Dockerfile
+    ports:
+      - "${APP_PORT}:80"
+      - "443:443"
+    volumes:
+      # Mount SSL certificates
+      - ./nginx/ssl:/etc/nginx/ssl:ro
+      - ./nginx/nginx.conf:/etc/nginx/nginx.conf:ro
+    environment:
+      - ENABLE_SSL=true
+      - FORCE_HTTPS=true
+
+  webserver:
+    # Add security configurations
+    environment:
+      # Security
+      APP_ENV: ${APP_ENV}
+      APP_DEBUG: ${APP_DEBUG}
+      APP_KEY: ${APP_KEY}
+      
+      # Database
+      DB_HOST: db
+      DB_PORT: 3306
+      DB_DATABASE: ${DB_DATABASE}
+      DB_USERNAME: ${DB_USERNAME}
+      DB_PASSWORD: ${DB_PASSWORD}
+      
+      # Session configuration
+      SESSION_DRIVER: cookie
+      SESSION_COOKIE_HTTP_ONLY: true
+      SESSION_COOKIE_SECURE: true
+      SESSION_COOKIE_SAME_SITE: lax
+      
+      # Token configuration
+      SANCTUM_STATEFUL_DOMAINS: ${SANCTUM_STATEFUL_DOMAINS}
+      SANCTUM_TOKEN_EXPIRATION: 60
+    
+    # Add resource limits
+    deploy:
+      resources:
+        limits:
+          cpus: '1'
+          memory: 512M
+        reservations:
+          cpus: '0.5'
+          memory: 256M
+
+  web:
+    # Frontend with security headers
+    environment:
+      - REACT_APP_API_URL=https://localhost/api
+      - REACT_APP_SECURE_COOKIES=true
+    
+    # Add resource limits
+    deploy:
+      resources:
+        limits:
+          cpus: '1'
+          memory: 512M
+        reservations:
+          cpus: '0.5'
+          memory: 256M
+
+  db:
+    # Database security
+    command: 
+      - --default-authentication-plugin=mysql_native_password
+      - --skip-name-resolve
+      - --require-secure-transport=ON
+    environment:
+      MYSQL_ROOT_PASSWORD: ${DB_ROOT_PASSWORD}
+      MYSQL_DATABASE: ${DB_DATABASE}
+      MYSQL_USER: ${DB_USERNAME}
+      MYSQL_PASSWORD: ${DB_PASSWORD}
+    
+    # Add resource limits
+    deploy:
+      resources:
+        limits:
+          cpus: '1'
+          memory: 1G
+        reservations:
+          cpus: '0.5'
+          memory: 512M
+
+networks:
+  skynet:
+    driver: bridge
+    driver_opts:
+      com.docker.network.bridge.name: br_budgetbee
+
+volumes:
+  db_data:
+    driver: local

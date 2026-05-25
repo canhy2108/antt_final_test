@@ -15,20 +15,24 @@ return [
     |
     */
 
-    'paths' => ['api/*', 'sanctum/csrf-cookie'],
+    'paths' => ['api/*', 'sanctum/csrf-cookie', 'login', 'logout'],
 
-    'allowed_methods' => ['*'],
+    'allowed_methods' => ['GET', 'POST', 'PUT', 'PATCH', 'DELETE', 'OPTIONS'],
 
-    'allowed_origins' => ['*'],
+    // SECURITY: Whitelist specific origins ONLY — never '*'
+    // Read from env so production vs dev can differ
+    'allowed_origins' => array_filter(explode(',', env('CORS_ALLOWED_ORIGINS',
+        'http://localhost:3000,http://localhost:5173,http://localhost:80'))),
 
     'allowed_origins_patterns' => [],
 
-    'allowed_headers' => ['*'],
+    'allowed_headers' => ['Content-Type', 'X-Requested-With', 'Authorization', 'X-CSRF-Token', 'Accept', 'Origin'],
 
-    'exposed_headers' => [],
+    'exposed_headers' => ['X-CSRF-Token'],
 
-    'max_age' => 0,
+    'max_age' => 3600,
 
-    'supports_credentials' => false,
+    // Required for HttpOnly cookies to work with credentials
+    'supports_credentials' => true,
 
 ];

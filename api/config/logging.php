@@ -73,6 +73,16 @@ return [
             'replace_placeholders' => true,
         ],
 
+        // SECURITY: Audit channel for security-sensitive events
+        // Never include passwords, full tokens, PII
+        'audit' => [
+            'driver' => 'daily',
+            'path' => storage_path('logs/audit.log'),
+            'level' => 'info',
+            'days' => 90, // retain longer for compliance/forensics
+            'replace_placeholders' => false,
+        ],
+
         'slack' => [
             'driver' => 'slack',
             'url' => env('LOG_SLACK_WEBHOOK_URL'),

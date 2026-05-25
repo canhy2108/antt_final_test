@@ -1,4 +1,4 @@
-{
+viết lại toàn bộ code, và sửa lại toàn bộ cấu trúc của project với mục tiêu biến nó thành mobile app Native App (Ứng dụng thuần bản địa) để có thể chạy hoạc test trên Android studio{
     "name": "budgetbee",
     "dockerComposeFile": "docker-compose.yml",
     "service": "webserver",

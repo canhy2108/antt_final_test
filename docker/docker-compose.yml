@@ -4,7 +4,13 @@ services:
     image: ghcr.io/budgetbee/budgetbee/proxy:latest
     command: nginx -g "daemon off;"
     ports:
-      - "${APP_PORT}:80" # Port exposed on the host, e.g. 80 → http://localhost
+      # HTTP → auto-redirect to HTTPS at nginx config level
+      - "${APP_PORT:-80}:80"
+      # HTTPS (REQUIRED for production)
+      - "${APP_PORT_SSL:-443}:443"
+    volumes:
+      # Mount SSL certs (use Let's Encrypt in production)
+      - ./nginx/ssl:/etc/nginx/ssl:ro
     depends_on:
       - webserver
       - web
