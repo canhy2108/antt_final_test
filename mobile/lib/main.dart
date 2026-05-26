@@ -9,9 +9,11 @@ import 'core/router/app_router.dart';
 void main() async {
   WidgetsFlutterBinding.ensureInitialized();
 
-  // Font Inter load từ Google CDN khi có mạng, fallback Roboto khi không có
-  // Production: bundle Inter vào assets/ để offline hoàn toàn
-  GoogleFonts.config.allowRuntimeFetching = true;
+  // Disabled runtime font fetching — on emulators / restricted networks the
+  // gstatic.com download blocks the main thread waiting for the TCP timeout,
+  // triggering Android's "App isn't responding" dialog. Roboto fallback ships
+  // with Flutter and is good enough until we bundle Inter into assets/.
+  GoogleFonts.config.allowRuntimeFetching = false;
 
   // Lock portrait orientation (fintech apps rarely need landscape)
   await SystemChrome.setPreferredOrientations([

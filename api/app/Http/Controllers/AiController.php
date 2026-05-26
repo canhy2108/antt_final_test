@@ -53,6 +53,8 @@ class AiController extends Controller
 
     public static function predictCategory(string $name)
     {
+        $defaultCategoryId = (int) config('budgetbee.default_category_id', 44);
+
         $data = json_encode([[
             'name' => $name
         ]]);
@@ -67,10 +69,10 @@ class AiController extends Controller
 
         $category_id = trim($process->getOutput());
 
-        $category = Category::find($category_id);
+        $category = is_numeric($category_id) ? Category::find((int) $category_id) : null;
 
         if (!$category) {
-            $category = Category::find(44);
+            $category = Category::find($defaultCategoryId);
         }
 
         return $category;
@@ -78,9 +80,17 @@ class AiController extends Controller
 
     public function predictCategoryRequest(Request $request)
     {
-        $name = $request->get('name');
+        $validated = $request->validate([
+            'name' => 'required|string|min:1|max:255'
+        ]);
 
-        $category = $this->predictCategory($name);
+        $category = $this->predictCategory($validated['name']);
+
+        if (!$category) {
+            return response()->json([
+                'message' => 'Could not predict category'
+            ], 500);
+        }
 
         return response()->json([
             'category' => $category->id,

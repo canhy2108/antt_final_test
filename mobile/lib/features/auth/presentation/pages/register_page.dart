@@ -50,12 +50,14 @@ class _RegisterPageState extends ConsumerState<RegisterPage> {
       });
       if (mounted) context.go(AppRoutes.login);
     } on Exception catch (e) {
-      if (mounted) setState(() {
+      if (mounted) {
+        setState(() {
         _errorMessage = e.toString().contains('422')
             ? 'Email đã được sử dụng'
             : 'Đăng ký thất bại. Thử lại.';
         _isLoading = false;
-      });
+        });
+      }
     }
   }
 

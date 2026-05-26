@@ -32,6 +32,10 @@ class AccountController extends Controller
     {
         $account = Account::find($id);
 
+        if (!$account) {
+            return response()->json(['message' => 'Account not found'], 404);
+        }
+
         $this->authorize('view', $account);
 
         return response()->json($account);
@@ -75,6 +79,10 @@ class AccountController extends Controller
 
         $account = Account::find($id);
 
+        if (!$account) {
+            return response()->json(['message' => 'Account not found'], 404);
+        }
+
         $this->authorize('update', $account);
 
         $account->fill($data);
@@ -87,11 +95,13 @@ class AccountController extends Controller
     {
         $account = Account::find($id);
 
+        if (!$account) {
+            return response()->json(['message' => 'Account not found'], 404);
+        }
+
         $this->authorize('update', $account);
 
-        if (is_object($account)) {
-            $account->delete();
-        }
+        $account->delete();
 
         return response()->json([]);
     }
@@ -208,8 +218,17 @@ class AccountController extends Controller
         $account = Account::where('user_id', $request->user()->id)
             ->where('id', $id)->first();
 
+        if (!$account) {
+            return response()->json(['message' => 'Account not found'], 404);
+        }
+
         $amount = $data['balance'] - $account->balance;
+        if (abs($amount) < 0.005) {
+            return response()->json(['message' => 'Balance unchanged']);
+        }
         $type = ($amount > 0) ? 'income' : 'expense';
+
+        $defaultCategoryId = (int) config('budgetbee.default_category_id', 44);
 
         $newRecord = new Record();
         $newRecord->fill([
@@ -218,7 +237,7 @@ class AccountController extends Controller
             'from_account_id' => $account->id,
             'amount' => round($amount, 2),
             'type' => $type,
-            'category_id' => 44
+            'category_id' => $defaultCategoryId
         ]);
         $newRecord->save();
 

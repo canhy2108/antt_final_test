@@ -118,6 +118,10 @@ class RecordController extends Controller
     {
         $record = Record::find($id);
 
+        if (!$record) {
+            return response()->json(['message' => 'Record not found'], 404);
+        }
+
         $this->authorize('update', $record);
 
         $this->validate($request, [
@@ -153,6 +157,10 @@ class RecordController extends Controller
     {
         $record = Record::find($id);
 
+        if (!$record) {
+            return response()->json(['message' => 'Record not found'], 404);
+        }
+
         $this->authorize('delete', $record);
 
         $record->delete();
@@ -174,10 +182,11 @@ class RecordController extends Controller
             $query->where('date', '<=', (new DateTime($request->query('to_date')))->format('Y-m-d'));
         }
         if ($request->has('search_term')) {
-            $query->where('name', 'like', '%' . $request->query('search_term') . '%');
+            $term = str_replace(['%', '_'], ['\\%', '\\_'], $request->query('search_term'));
+            $query->where('name', 'like', '%' . $term . '%');
         }
         if ($request->has('limit')) {
-            $query->limit($request->query('limit'));
+            $query->limit((int) $request->query('limit'));
         }
 
         $records = $query->orderByDesc('date')

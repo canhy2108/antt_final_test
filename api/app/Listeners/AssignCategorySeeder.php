@@ -5,7 +5,8 @@ namespace App\Listeners;
 use App\Events\UserCreated;
 use Illuminate\Contracts\Queue\ShouldQueue;
 use Illuminate\Queue\InteractsWithQueue;
-use Illuminate\Support\Facades\Artisan;
+use Illuminate\Support\Facades\DB;
+use Illuminate\Support\Facades\Log;
 use App\Models\ParentCategory;
 use App\Models\Category;
 
@@ -14,38 +15,48 @@ class AssignCategorySeeder
     use InteractsWithQueue;
 
     /**
-     * Handle the event.
+     * Seed default category tree for a freshly-created user.
      *
-     * @param  UserCreated  $event
-     * @return void
+     * Wrapped in a transaction so a failure halfway through doesn't leave
+     * the user with a partial category list. firstOrCreate makes the
+     * listener idempotent — safe if the event fires twice (e.g. retry).
      */
     public function handle(UserCreated $event)
     {
-
         $json = file_get_contents(database_path('seeders/data/categories.json'));
-
         $data = json_decode($json, true);
 
-        foreach ($data as $parentCategory) {
-            $newParentCategory = new ParentCategory();
-            $newParentCategory->fill([
-                'user_id' => $event->user->id,
-                'name' => $parentCategory['name'],
-                'color' => $parentCategory['color'],
-                'icon' => $parentCategory['icon']
-            ]);
-            $newParentCategory->save();
-
-            foreach ($parentCategory['categories'] as $category) {
-                $newCategory = new Category();
-                $newCategory->fill([
-                    'user_id' => $event->user->id,
-                    'parent_category_id' => $newParentCategory->id,
-                    'name' => $category['name'],
-                    'icon' => $category['icon']
-                ]);
-                $newCategory->save();
-            }
+        if (!is_array($data)) {
+            Log::warning('AssignCategorySeeder: categories.json missing or invalid');
+            return;
         }
+
+        DB::transaction(function () use ($event, $data) {
+            foreach ($data as $parentCategory) {
+                $newParentCategory = ParentCategory::firstOrCreate(
+                    [
+                        'user_id' => $event->user->id,
+                        'name' => $parentCategory['name'],
+                    ],
+                    [
+                        'color' => $parentCategory['color'],
+                        'icon' => $parentCategory['icon'],
+                    ]
+                );
+
+                foreach ($parentCategory['categories'] as $category) {
+                    Category::firstOrCreate(
+                        [
+                            'user_id' => $event->user->id,
+                            'parent_category_id' => $newParentCategory->id,
+                            'name' => $category['name'],
+                        ],
+                        [
+                            'icon' => $category['icon'],
+                        ]
+                    );
+                }
+            }
+        });
     }
 }

@@ -4,9 +4,9 @@ import 'package:go_router/go_router.dart';
 import '../../../../core/theme/app_colors.dart';
 import '../../../../core/theme/app_text_styles.dart';
 import '../../../../core/theme/app_theme.dart';
-import '../../../../core/security/secure_storage_service.dart';
-import '../../../../core/security/biometric_service.dart';
 import '../../../../core/router/app_router.dart';
+import '../../../../core/security/secure_storage_service.dart';
+import '../../../../core/network/api_client.dart';
 
 class SplashPage extends ConsumerStatefulWidget {
   const SplashPage({super.key});
@@ -44,8 +44,14 @@ class _SplashPageState extends ConsumerState<SplashPage>
   }
 
   Future<void> _init() async {
-    // Wait for animation
-    await Future.delayed(const Duration(milliseconds: 2000));
+    // Bootstrap network layer (cookie jar + dio interceptors) BEFORE any
+    // page calls into apiClientProvider. Done in parallel with the splash
+    // animation delay to keep startup snappy.
+    final initFuture = ref.read(apiClientInitProvider.future);
+    await Future.wait([
+      initFuture,
+      Future.delayed(const Duration(milliseconds: 2000)),
+    ]);
     if (!mounted) return;
 
     final storage = ref.read(secureStorageProvider);
@@ -61,8 +67,10 @@ class _SplashPageState extends ConsumerState<SplashPage>
     final timedOut = await storage.isSessionTimedOut(timeoutMinutes: 30);
 
     if (biometricEnabled && timedOut) {
+      if (!mounted) return;
       context.go(AppRoutes.biometricLock);
     } else {
+      if (!mounted) return;
       context.go(AppRoutes.dashboard);
     }
   }

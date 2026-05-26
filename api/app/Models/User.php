@@ -59,9 +59,14 @@ class User extends Authenticatable
             Log::info("Created {$user->getTable()} with ID {$user->id}");
             static::withoutEvents(function () use ($user) {
                 event(new UserCreated($user));
+                $defaultCurrency = Currency::where('code', 'USD')->first();
+                if (!$defaultCurrency) {
+                    Log::warning("Default USD currency missing — skipping UserCurrency seed for user {$user->id}");
+                    return;
+                }
                 $currency = UserCurrency::create([
                     'user_id' => $user->id,
-                    'currency_id' => Currency::where('code', 'USD')->first()->id,
+                    'currency_id' => $defaultCurrency->id,
                     'exchange_rate_to_default_currency' => 1
                 ]);
                 $user->fill(['currency_id' => $currency->id])
@@ -70,17 +75,17 @@ class User extends Authenticatable
         });
 
         static::creating(function ($model) {
-            Cache::clear();
+            Cache::flush();
             Log::info("Creating a new {$model->getTable()}");
         });
 
         static::updating(function ($model) {
-            Cache::clear();
+            Cache::flush();
             Log::info("Updating {$model->getTable()} with ID {$model->id}");
         });
 
         static::deleting(function ($model) {
-            Cache::clear();
+            Cache::flush();
             Log::info("Deleting {$model->getTable()} with ID {$model->id}");
         });
     }
@@ -97,9 +102,20 @@ class User extends Authenticatable
 
     public function getSettings()
     {
+        if (!$this->currency) {
+            return [
+                'currency' => [
+                    'id' => '',
+                    'name' => '',
+                    'code' => '',
+                    'symbol' => ''
+                ]
+            ];
+        }
+
         return [
             'currency' => [
-                'id' => $this->currency ? $this->currency->id : '',
+                'id' => $this->currency->id,
                 'name' => $this->currency->name,
                 'code' => $this->currency->code,
                 'symbol' => $this->currency->symbol

@@ -33,15 +33,15 @@ class Account extends Model
         parent::boot();
 
         static::creating(function () {
-            Cache::clear();
+            Cache::flush();
         });
 
         static::updating(function () {
-            Cache::clear();
+            Cache::flush();
         });
 
         static::deleting(function () {
-            Cache::clear();
+            Cache::flush();
         });
     }
 
@@ -62,7 +62,7 @@ class Account extends Model
 
     public function getTypeNameAttribute()
     {
-        return $this->type->name;
+        return $this->type ? $this->type->name : '';
     }
 
     public function getCurrencySymbolAttribute()
@@ -82,40 +82,26 @@ class Account extends Model
 
     public function getBalanceAttribute()
     {
-
-        $initialBalance = $this->initial_balance;
-        return Record::where('from_account_id', $this->id)
-            ->orderBy('date')
-            ->pluck('amount')
-            ->reduce(function ($balance, $amount) {
-                return round($balance + $amount, 2);
-            }, $initialBalance);
+        // SUM in SQL — was previously pulling every record into PHP and
+        // reducing in-memory (N records * N accounts on dashboard load).
+        $sum = (float) Record::where('from_account_id', $this->id)->sum('amount');
+        return round((float) $this->initial_balance + $sum, 2);
     }
 
     public function getTotalIncomesAttribute()
     {
-
-        $initialBalance = $this->initial_balance;
-        return Record::where('from_account_id', $this->id)
+        $sum = (float) Record::where('from_account_id', $this->id)
             ->where('type', 'income')
-            ->orderBy('date')
-            ->pluck('amount')
-            ->reduce(function ($balance, $amount) {
-                return $balance + $amount;
-            }, $initialBalance);
+            ->sum('amount');
+        return round((float) $this->initial_balance + $sum, 2);
     }
 
     public function getTotalExpensesAttribute()
     {
-
-        $initialBalance = $this->initial_balance;
-        return Record::where('from_account_id', $this->id)
+        $sum = (float) Record::where('from_account_id', $this->id)
             ->where('type', 'expense')
-            ->orderBy('date')
-            ->pluck('amount')
-            ->reduce(function ($balance, $amount) {
-                return $balance + $amount;
-            }, $initialBalance);
+            ->sum('amount');
+        return round((float) $this->initial_balance + $sum, 2);
     }
 
     public function getBalanceBaseCurrencyAttribute()

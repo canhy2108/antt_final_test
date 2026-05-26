@@ -26,11 +26,11 @@ class Category extends Model
 
     public function getColorAttribute()
     {
-        return $this->parent->color;
+        return $this->parent ? $this->parent->color : '';
     }
 
     public function getParentNameAttribute()
     {
-        return $this->parent->name;
+        return $this->parent ? $this->parent->name : '';
     }
 }

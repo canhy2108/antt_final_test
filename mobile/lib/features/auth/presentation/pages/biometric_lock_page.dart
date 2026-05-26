@@ -35,7 +35,7 @@ class _BiometricLockPageState extends ConsumerState<BiometricLockPage> {
     setState(() => _loading = false);
     if (result == BiometricResult.success && mounted) {
       await ref.read(secureStorageProvider).updateLastActive();
-      context.go(AppRoutes.dashboard);
+      if (mounted) context.go(AppRoutes.dashboard);
     }
   }
 

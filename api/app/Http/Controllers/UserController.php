@@ -88,8 +88,9 @@ class UserController extends Controller
         ]);
 
         $data = $request->only('currency_id', 'exchange_rate_to_default_currency');
+        $data['user_id'] = Auth::id();
 
-        (new UserCurrency($data))->save();
+        UserCurrency::create($data);
 
         return response()->json();
     }
@@ -112,19 +113,21 @@ class UserController extends Controller
 
     public function update(Request $request, $id)
     {
-
         $user = User::find($id);
+
+        if (!$user) {
+            return response()->json(['message' => 'User not found'], 404);
+        }
 
         $this->authorize('update', $user);
 
         $request->validate([
-            'name' => 'required|string',
+            'name' => 'required|string|min:2|max:100',
             'email' => 'required|string|max:255|email',
-            'password' => 'nullable|string|min:4',
+            'password' => ['nullable', 'string', \Illuminate\Validation\Rules\Password::min(12)->max(128)->uncompromised()],
             'confirm_password' => 'nullable|string|same:password',
             'currency_id' => 'nullable|integer|exists:App\Models\UserCurrency,id'
         ]);
-
 
         $data = $request->only('name', 'email', 'password', 'currency_id');
 
@@ -132,6 +135,10 @@ class UserController extends Controller
             unset($data['password']);
         } else {
             $data['password'] = Hash::make($data['password']);
+        }
+
+        if (isset($data['email'])) {
+            $data['email'] = strtolower($data['email']);
         }
 
         $user->update($data);

@@ -16,26 +16,26 @@ return new class extends Migration
      */
     public function up(): void
     {
-        $users = User::all();
+        // Run CurrencySeeder inline (was previously fired via DatabaseSeeder
+        // with a magic 5-second sleep — fragile and order-dependent).
+        (new CurrencySeeder())->run();
 
-        (new DatabaseSeeder())->call(CurrencySeeder::class);
+        $usd = Currency::where('code', 'USD')->first();
+        if (!$usd) {
+            // CurrencySeeder failed or data file missing — bail rather than
+            // crash mid-loop with a null deref.
+            return;
+        }
 
-        sleep(5);
+        foreach (User::all() as $user) {
+            if ($user->currency) continue;
 
-        foreach ($users as $user) {
-            $currency = $user->currency;
-            if (is_null($currency)) {
-                $userCurrency = UserCurrency::where('user_id', $user->id)->first();
-                if (is_null($userCurrency)) {
-                    $userCurrency = UserCurrency::create([
-                        'user_id' => $user->id,
-                        'currency_id' => Currency::where('code', 'USD')->first()->id,
-                        'exchange_rate_to_default_currency' => 1
-                    ]);
-                }
-                $user->fill(['currency_id' => $userCurrency->id])
-                    ->save();
-            }
+            $userCurrency = UserCurrency::firstOrCreate(
+                ['user_id' => $user->id, 'currency_id' => $usd->id],
+                ['exchange_rate_to_default_currency' => 1]
+            );
+
+            $user->fill(['currency_id' => $userCurrency->id])->save();
         }
     }
 };

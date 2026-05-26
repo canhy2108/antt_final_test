@@ -28,7 +28,7 @@ class UserCurrency extends Model
     protected static function booted()
     {
         static::creating(function ($userCurrency) {
-            Cache::clear();
+            Cache::flush();
             $user = Auth::user();
             if ($user) {
                 $userCurrency->user_id = $user->id;
@@ -36,13 +36,16 @@ class UserCurrency extends Model
         });
 
         static::updating(function () {
-            Cache::clear();
+            Cache::flush();
         });
 
+        // Enforce per-user data isolation at the model layer. Without this,
+        // an authorisation bug in a controller could leak another user's
+        // currencies. Skipped when no authenticated user (CLI, jobs, seeders).
         static::addGlobalScope('user_id', function (Builder $builder) {
             $user = Auth::user();
             if ($user) {
-                // $builder->where('user_id', Auth::id());
+                $builder->where($builder->getModel()->getTable() . '.user_id', $user->id);
             }
         });
     }
@@ -64,16 +67,16 @@ class UserCurrency extends Model
 
     public function getNameAttribute()
     {
-        return $this->currency->name;
+        return $this->currency ? $this->currency->name : '';
     }
 
     public function getCodeAttribute()
     {
-        return $this->currency->code;
+        return $this->currency ? $this->currency->code : '';
     }
 
     public function getSymbolAttribute()
     {
-        return $this->currency->symbol;
+        return $this->currency ? $this->currency->symbol : '';
     }
 }

@@ -37,7 +37,7 @@ class Record extends Model
         parent::boot();
 
         static::created(function ($record) {
-            Cache::clear();
+            Cache::flush();
 
             if (!static::$disableAiControllerProcessing) {
                 AiController::trainModelWithRecord($record);
@@ -47,6 +47,8 @@ class Record extends Model
                 static::withoutEvents(function () use ($record) {
                     $transfercategory = 1;
                     $recordAssoc = ($record->link_record_id) ? Record::find($record->link_record_id) : new Record();
+                    $rate = (float) ($record->rate ?? 1);
+                    $inverseRate = ($rate > 0) ? round(1 / $rate, 9) : 1;
                     $recordAssoc->fill([
                         'user_id' => $record->user_id,
                         'link_record_id' => $record->id,
@@ -57,7 +59,7 @@ class Record extends Model
                         'type' => $record->type,
                         'name' => $record->name,
                         'category_id' => $transfercategory,
-                        'rate' => round(1 / $record->rate, 9)
+                        'rate' => $inverseRate
                     ]);
                     $recordAssoc->save();
                     $record->fill([
@@ -70,7 +72,7 @@ class Record extends Model
         });
 
         static::deleting(function ($record) {
-            Cache::clear();
+            Cache::flush();
             if ($record->type == 'transfer') {
                 static::withoutEvents(function () use ($record) {
                     $recordAssoc = Record::find($record->link_record_id);
@@ -82,7 +84,7 @@ class Record extends Model
         });
         
         static::updating(function ($record) {
-            Cache::clear();
+            Cache::flush();
 
             if (!static::$disableAiControllerProcessing) {
                 AiController::trainModelWithRecord($record);
@@ -99,6 +101,8 @@ class Record extends Model
                             if ($recordAssoc->id) {
                                 $recordAssoc->restore();
                             }
+                            $rate = (float) ($record->rate ?? 1);
+                            $inverseRate = ($rate > 0) ? round(1 / $rate, 9) : 1;
                             $recordAssoc->fill([
                                 'user_id' => $record->user_id,
                                 'link_record_id' => $record->id,
@@ -109,7 +113,7 @@ class Record extends Model
                                 'type' => $record->type,
                                 'name' => $record->name,
                                 'category_id' => $transfercategory,
-                                'rate' => round(1 / $record->rate, 9)
+                                'rate' => $inverseRate
                             ]);
                             $recordAssoc->save();
                             $record->fill([
@@ -150,32 +154,32 @@ class Record extends Model
 
     public function getCategoryNameAttribute()
     {
-        return $this->category->name;
+        return $this->category ? $this->category->name : '';
     }
 
     public function getParentCategoryIdAttribute()
     {
-        return $this->category->parent->id;
+        return ($this->category && $this->category->parent) ? $this->category->parent->id : null;
     }
 
     public function getParentCategoryNameAttribute()
     {
-        return $this->category->parent->name;
+        return ($this->category && $this->category->parent) ? $this->category->parent->name : '';
     }
 
     public function getCategoryColorAttribute()
     {
-        return $this->category->parent->color;
+        return ($this->category && $this->category->parent) ? $this->category->parent->color : '';
     }
 
     public function getParentCategoryIconAttribute()
     {
-        return $this->category->parent->icon;
+        return ($this->category && $this->category->parent) ? $this->category->parent->icon : '';
     }
 
     public function getAccountNameAttribute()
     {
-        return $this->account->name;
+        return $this->account ? $this->account->name : '';
     }
 
     public function getToAccountNameAttribute()
@@ -185,22 +189,24 @@ class Record extends Model
 
     public function getAccountTypeNameAttribute()
     {
-        return $this->account->type_name;
+        return $this->account ? $this->account->type_name : '';
     }
 
     public function getIconAttribute()
     {
-        return $this->category->icon;
+        return $this->category ? $this->category->icon : '';
     }
 
     public function getCurrencySymbolAttribute()
     {
-        return $this->account->currency_symbol;
+        return $this->account ? $this->account->currency_symbol : '';
     }
 
     public function getAmountBaseCurrencyAttribute()
     {
-        return CurrencyConverter::convert($this->amount, $this->account->currency);
+        return $this->account
+            ? CurrencyConverter::convert($this->amount, $this->account->currency)
+            : $this->amount;
     }
 
     public function scopeFilterByRequest($query, Request $request, array $excludes = [])
@@ -217,7 +223,8 @@ class Record extends Model
             $query->where('date', '<=', (new DateTime($request->query('to_date')))->format('Y-m-d'));
         }
         if ($request->has('search_term') && !in_array('search_term', $excludes)) {
-            $query->where('name', 'like', '%' . $request->query('search_term') . '%');
+            $term = str_replace(['%', '_'], ['\\%', '\\_'], $request->query('search_term'));
+            $query->where('name', 'like', '%' . $term . '%');
         }
 
         return $query;

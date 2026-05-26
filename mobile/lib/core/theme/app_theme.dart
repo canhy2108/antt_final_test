@@ -29,7 +29,7 @@ abstract class AppTheme {
   // ── Shadow ─────────────────────────────────────────────────────────────
   static List<BoxShadow> get shadowS => [
         BoxShadow(
-          color: Colors.black.withOpacity(0.06),
+          color: Colors.black.withValues(alpha: 0.06),
           blurRadius: 8,
           offset: const Offset(0, 2),
         ),
@@ -37,7 +37,7 @@ abstract class AppTheme {
 
   static List<BoxShadow> get shadowM => [
         BoxShadow(
-          color: Colors.black.withOpacity(0.08),
+          color: Colors.black.withValues(alpha: 0.08),
           blurRadius: 16,
           offset: const Offset(0, 4),
         ),
@@ -45,7 +45,7 @@ abstract class AppTheme {
 
   static List<BoxShadow> get shadowL => [
         BoxShadow(
-          color: Colors.black.withOpacity(0.12),
+          color: Colors.black.withValues(alpha: 0.12),
           blurRadius: 24,
           offset: const Offset(0, 8),
         ),
@@ -53,7 +53,7 @@ abstract class AppTheme {
 
   static List<BoxShadow> get shadowGreen => [
         BoxShadow(
-          color: AppColors.primary.withOpacity(0.35),
+          color: AppColors.primary.withValues(alpha: 0.35),
           blurRadius: 20,
           offset: const Offset(0, 6),
         ),
@@ -69,9 +69,7 @@ abstract class AppTheme {
         onPrimary: AppColors.textOnPrimary,
         secondary: AppColors.dark,
         onSecondary: AppColors.white,
-        background: AppColors.background,
         surface: AppColors.surface,
-        onBackground: AppColors.textPrimary,
         onSurface: AppColors.textPrimary,
         error: AppColors.expense,
         brightness: Brightness.light,
@@ -208,9 +206,7 @@ abstract class AppTheme {
         onPrimary: AppColors.textOnPrimary,
         secondary: AppColors.grey200,
         onSecondary: AppColors.dark,
-        background: AppColors.darkBackground,
         surface: AppColors.darkSurface,
-        onBackground: AppColors.white,
         onSurface: AppColors.white,
         error: AppColors.expense,
         brightness: Brightness.dark,
@@ -253,11 +249,11 @@ abstract class AppTheme {
         contentPadding: const EdgeInsets.symmetric(horizontal: 20, vertical: 16),
         border: OutlineInputBorder(
           borderRadius: BorderRadius.circular(radiusM),
-          borderSide: BorderSide(color: Colors.white.withOpacity(0.1)),
+          borderSide: BorderSide(color: Colors.white.withValues(alpha: 0.1)),
         ),
         enabledBorder: OutlineInputBorder(
           borderRadius: BorderRadius.circular(radiusM),
-          borderSide: BorderSide(color: Colors.white.withOpacity(0.1)),
+          borderSide: BorderSide(color: Colors.white.withValues(alpha: 0.1)),
         ),
         focusedBorder: OutlineInputBorder(
           borderRadius: BorderRadius.circular(radiusM),

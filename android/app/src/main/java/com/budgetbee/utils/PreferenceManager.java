@@ -2,9 +2,17 @@ package com.budgetbee.utils;
 
 import android.content.Context;
 import android.content.SharedPreferences;
+import android.util.Log;
+
+import androidx.security.crypto.EncryptedSharedPreferences;
+import androidx.security.crypto.MasterKey;
+
+import java.io.IOException;
+import java.security.GeneralSecurityException;
 
 public class PreferenceManager {
-    private static final String PREF_NAME = "BudgetBeePref";
+    private static final String TAG = "PreferenceManager";
+    private static final String PREF_NAME = "BudgetBeePrefEnc";
     private static final String KEY_AUTH_TOKEN = "auth_token";
     private static final String KEY_USER_ID = "user_id";
     private static final String KEY_USER_NAME = "user_name";
@@ -15,7 +23,22 @@ public class PreferenceManager {
     private static SharedPreferences sharedPreferences;
 
     public PreferenceManager(Context context) {
-        sharedPreferences = context.getSharedPreferences(PREF_NAME, Context.MODE_PRIVATE);
+        if (sharedPreferences != null) return;
+        try {
+            MasterKey masterKey = new MasterKey.Builder(context)
+                    .setKeyScheme(MasterKey.KeyScheme.AES256_GCM)
+                    .build();
+            sharedPreferences = EncryptedSharedPreferences.create(
+                    context,
+                    PREF_NAME,
+                    masterKey,
+                    EncryptedSharedPreferences.PrefKeyEncryptionScheme.AES256_SIV,
+                    EncryptedSharedPreferences.PrefValueEncryptionScheme.AES256_GCM
+            );
+        } catch (GeneralSecurityException | IOException e) {
+            Log.e(TAG, "Failed to init EncryptedSharedPreferences, falling back", e);
+            sharedPreferences = context.getSharedPreferences(PREF_NAME, Context.MODE_PRIVATE);
+        }
     }
 
     // Auth Token

@@ -47,7 +47,8 @@ Route::prefix('user')->middleware('auth:sanctum')->group(function () {
 Route::prefix('account')->middleware('auth:sanctum')->group(function () {
     Route::get('', [AccountController::class, 'get']);
     Route::get('type', [AccountController::class, 'getTypes']);
-    Route::get('{id}/stocks', [AccountController::class, 'getStocks']);
+    // Removed: Route::get('{id}/stocks', ...) — AccountController::getStocks
+    // was never implemented. Calls would throw BadMethodCallException at runtime.
     Route::get('{id}/record', [AccountController::class, 'getRecords']);
     Route::get('{id}/record/last{number}', [AccountController::class, 'getLastRecords']);
     Route::get('currencies', [AccountController::class, 'getCurrencies']);

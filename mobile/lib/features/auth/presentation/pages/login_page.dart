@@ -102,9 +102,9 @@ class _LoginPageState extends ConsumerState<LoginPage>
         // Check if first login — show passkey upsell
         final passkeyEnabled = await storage.getPasskeyCredentialId();
         if (passkeyEnabled == null) {
-          context.go(AppRoutes.passkeyUpsell);
+          if (mounted) context.go(AppRoutes.passkeyUpsell);
         } else {
-          context.go(AppRoutes.dashboard);
+          if (mounted) context.go(AppRoutes.dashboard);
         }
       }
     } on Exception catch (e) {
@@ -231,11 +231,11 @@ class _LoginPageState extends ConsumerState<LoginPage>
                             width: double.infinity,
                             padding: const EdgeInsets.all(12),
                             decoration: BoxDecoration(
-                              color: AppColors.expense.withOpacity(0.1),
+                              color: AppColors.expense.withValues(alpha: 0.1),
                               borderRadius:
                                   BorderRadius.circular(AppTheme.radiusM),
                               border: Border.all(
-                                  color: AppColors.expense.withOpacity(0.3)),
+                                  color: AppColors.expense.withValues(alpha: 0.3)),
                             ),
                             child: Row(
                               children: [
@@ -277,14 +277,14 @@ class _LoginPageState extends ConsumerState<LoginPage>
                           const SizedBox(height: 16),
                           Row(
                             children: [
-                              Expanded(child: Divider(color: AppColors.border)),
+                              Expanded(child: const Divider(color: AppColors.border)),
                               Padding(
                                 padding:
                                     const EdgeInsets.symmetric(horizontal: 12),
                                 child: Text('hoặc',
                                     style: AppTextStyles.caption),
                               ),
-                              Expanded(child: Divider(color: AppColors.border)),
+                              Expanded(child: const Divider(color: AppColors.border)),
                             ],
                           ),
                           const SizedBox(height: 16),

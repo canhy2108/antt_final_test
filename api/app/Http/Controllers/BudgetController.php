@@ -106,11 +106,7 @@ class BudgetController extends Controller
             ->find($id);
 
         if (!$budget) {
-            return response()->json(['message' => 'Budget not found'], 400);
-        }
-
-        if (!Auth::check()) {
-            dd('NOPE');
+            return response()->json(['message' => 'Budget not found'], 404);
         }
 
         $this->authorize('delete', $budget);

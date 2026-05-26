@@ -83,17 +83,29 @@ class _StatCard extends StatelessWidget {
 class _SkeletonCard extends StatelessWidget {
   @override
   Widget build(BuildContext context) {
+    // height 90 - vertical padding 32 = 58px inner. The child column needed
+    // 64px (34 icon + 10 gap + 6 + 14), overflowing by 6. Wrap value bars in
+    // a `mainAxisSize: min` Column and drop the Spacer so we don't force-fill.
     return Container(
-      height: 90, padding: const EdgeInsets.all(16),
+      height: 110, padding: const EdgeInsets.all(16),
       decoration: BoxDecoration(
         color: AppColors.surface, borderRadius: BorderRadius.circular(AppTheme.radiusL)),
-      child: Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
-        Container(width: 34, height: 34, decoration: BoxDecoration(color: AppColors.grey200, shape: BoxShape.circle)),
-        const Spacer(),
-        Container(height: 10, width: 60, color: AppColors.grey200),
-        const SizedBox(height: 6),
-        Container(height: 14, width: 80, color: AppColors.grey200),
-      ]),
+      child: Column(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        mainAxisAlignment: MainAxisAlignment.spaceBetween,
+        children: [
+          Container(width: 34, height: 34, decoration: BoxDecoration(color: AppColors.grey200, shape: BoxShape.circle)),
+          Column(
+            crossAxisAlignment: CrossAxisAlignment.start,
+            mainAxisSize: MainAxisSize.min,
+            children: [
+              Container(height: 10, width: 60, color: AppColors.grey200),
+              const SizedBox(height: 6),
+              Container(height: 14, width: 80, color: AppColors.grey200),
+            ],
+          ),
+        ],
+      ),
     );
   }
 }

@@ -30,9 +30,13 @@ class ApiClient {
 
     _dio = Dio(BaseOptions(
       baseUrl: _baseUrl,
-      connectTimeout: const Duration(seconds: 15),
-      receiveTimeout: const Duration(seconds: 30),
-      sendTimeout: const Duration(seconds: 30),
+      // Generous timeouts because the dev backend (Laravel on a Windows
+      // Docker bind-mount) takes 30-60s on the FIRST request after a
+      // worker restart while OPcache warms up. After warm-up, requests
+      // are sub-second. In production drop these to 15s/15s.
+      connectTimeout: const Duration(seconds: 30),
+      receiveTimeout: const Duration(seconds: 120),
+      sendTimeout: const Duration(seconds: 60),
       headers: {
         'Accept': 'application/json',
         'Content-Type': 'application/json',
@@ -151,6 +155,10 @@ class ApiClient {
 }
 
 // ── Providers ────────────────────────────────────────────────────────────────
+/// IMPORTANT: ApiClient.init() is async (sets up cookie jar / dio).
+/// Callers MUST await [apiClientInitProvider] (typically once on app startup
+/// via the SplashPage) before reading [apiClientProvider]. Reading the sync
+/// provider before init throws LateInitializationError on first request.
 final apiClientProvider = Provider<ApiClient>((ref) {
   final storage = ref.read(secureStorageProvider);
   return ApiClient(storage);

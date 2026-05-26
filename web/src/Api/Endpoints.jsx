@@ -3,24 +3,30 @@ import Cookies from "universal-cookie";
 
 const cookies = new Cookies();
 const API_BASE_URL = "/api";
-const HEADERS = {
-    headers: { Authorization: "Bearer " + cookies.get("token") },
-};
+
+const authHeaders = () => ({
+    headers: { Authorization: "Bearer " + (cookies.get("token") || "") },
+});
 
 const handleErrors = (error) => {
+    if (!error.response) {
+        return { error: "Network error. Please check your connection." };
+    }
+
     const status = error.response.status;
 
     let message;
     switch (status) {
         case 401:
-            cookies.remove("token");
+            cookies.remove("token", { path: "/" });
             window.location.href = "/login";
             break;
         case 404:
             message = "Not Found";
             break;
         default:
-            message = error.response.data.error;
+            message = (error.response.data && (error.response.data.error || error.response.data.message))
+                || "An unexpected error occurred";
             break;
     }
 
@@ -91,14 +97,15 @@ const Endpoints = {
         try {
             const response = await axios.post(
                 `${API_BASE_URL}/login`,
-                data,
-                HEADERS
+                data
             );
-            var expirationDate = new Date();
+            const expirationDate = new Date();
             expirationDate.setTime(expirationDate.getTime() + 3600000);
             cookies.set("token", response.data.access_token, {
                 path: "/",
                 expires: expirationDate,
+                sameSite: "lax",
+                secure: window.location.protocol === "https:",
             });
             return response.data;
         } catch (error) {
@@ -129,9 +136,12 @@ const Endpoints = {
     },
 
     userLogout: async () => {
-        post(`user/logout`, []);
-        cookies.remove("token");
-        window.location.href = "/login";
+        try {
+            await post(`user/logout`, []);
+        } finally {
+            cookies.remove("token", { path: "/" });
+            window.location.href = "/login";
+        }
     },
 
     userUpdate: async (data, id) => {

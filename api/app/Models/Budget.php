@@ -24,27 +24,27 @@ class Budget extends Model
 
     public function getParentCategoryidAttribute()
     {
-        return $this->category->parent->id;
+        return ($this->category && $this->category->parent) ? $this->category->parent->id : null;
     }
 
     public function getParentCategoryNameAttribute()
     {
-        return $this->category->parent->name;
+        return ($this->category && $this->category->parent) ? $this->category->parent->name : '';
     }
 
     public function getCategoryNameAttribute()
     {
-        return $this->category->name;
+        return $this->category ? $this->category->name : '';
     }
 
     public function getCategoryIconAttribute()
     {
-        return $this->category->icon;
+        return $this->category ? $this->category->icon : '';
     }
 
     public function getCategoryColorAttribute()
     {
-        return $this->category->color;
+        return $this->category ? $this->category->color : '';
     }
 
     public function getSpentAttribute()
@@ -62,6 +62,9 @@ class Budget extends Model
 
     public function getSpentPercentAttribute()
     {
+        if (empty($this->amount) || (float) $this->amount == 0.0) {
+            return 0;
+        }
         return round($this->spent * 100 / $this->amount, 2);
     }
 }
