@@ -4,8 +4,11 @@ import android.os.Bundle
 import android.view.WindowManager
 import androidx.activity.ComponentActivity
 import androidx.activity.compose.setContent
+import androidx.activity.viewModels
 import androidx.compose.runtime.*
-import androidx.room.Room
+import androidx.compose.runtime.saveable.rememberSaveable
+import androidx.lifecycle.ViewModel
+import androidx.lifecycle.ViewModelProvider
 import com.example.expensemanager.data.AppDatabase
 import com.example.expensemanager.security.SecurePreferences
 import com.example.expensemanager.ui.AuthScreen
@@ -14,6 +17,27 @@ import com.example.expensemanager.viewmodel.AuthViewModel
 import com.example.expensemanager.viewmodel.TransactionViewModel
 
 class MainActivity : ComponentActivity() {
+
+    // Khởi tạo ViewModel đúng cách thông qua Factory để giữ dữ liệu khi xoay màn hình
+    private val authViewModel: AuthViewModel by viewModels {
+        object : ViewModelProvider.Factory {
+            @Suppress("UNCHECKED_CAST")
+            override fun <T : ViewModel> create(modelClass: Class<T>): T {
+                return AuthViewModel(SecurePreferences(applicationContext)) as T
+            }
+        }
+    }
+
+    private val transactionViewModel: TransactionViewModel by viewModels {
+        object : ViewModelProvider.Factory {
+            @Suppress("UNCHECKED_CAST")
+            override fun <T : ViewModel> create(modelClass: Class<T>): T {
+                val db = AppDatabase.getDatabase(applicationContext)
+                return TransactionViewModel(db.transactionDao()) as T
+            }
+        }
+    }
+
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
 
@@ -23,15 +47,9 @@ class MainActivity : ComponentActivity() {
             WindowManager.LayoutParams.FLAG_SECURE
         )
 
-        // Khởi tạo Database và Preferences
-        val db = AppDatabase.getDatabase(applicationContext)
-        val prefs = SecurePreferences(applicationContext)
-        
-        val authViewModel = AuthViewModel(prefs)
-        val transactionViewModel = TransactionViewModel(db.transactionDao())
-
         setContent {
-            var isAuthenticated by remember { mutableStateOf(false) }
+            // Sử dụng rememberSaveable để không bị mất trạng thái khi xoay màn hình
+            var isAuthenticated by rememberSaveable { mutableStateOf(false) }
 
             if (isAuthenticated) {
                 HomeScreen(transactionViewModel, onLogout = { isAuthenticated = false })

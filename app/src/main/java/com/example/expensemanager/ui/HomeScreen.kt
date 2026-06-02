@@ -32,13 +32,13 @@ import kotlinx.coroutines.delay
 fun HomeScreen(viewModel: TransactionViewModel, onLogout: () -> Unit) {
     val transactions by viewModel.transactions.collectAsState()
     val username by viewModel.currentUsername.collectAsState()
+    val stats by viewModel.balanceStats.collectAsState()
+    
+    val (totalIncome, totalExpense, balance) = stats
+    
     var showAddDialog by remember { mutableStateOf(false) }
     var editingTransaction by remember { mutableStateOf<Transaction?>(null) }
     var isBalanceVisible by remember { mutableStateOf(false) }
-
-    val totalIncome = transactions.filter { it.type == "income" }.sumOf { it.amount }
-    val totalExpense = transactions.filter { it.type == "expense" }.sumOf { it.amount }
-    val balance = totalIncome - totalExpense
 
     Scaffold(
         topBar = {

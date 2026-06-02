@@ -20,8 +20,16 @@ class TransactionViewModel(private val dao: TransactionDao) : ViewModel() {
 
     @OptIn(ExperimentalCoroutinesApi::class)
     val transactions = _currentUsername.flatMapLatest { username ->
-        dao.getAllForUser(username)
-    }.stateIn(viewModelScope, SharingStarted.WhileSubscribed(), emptyList())
+        if (username.isEmpty()) flowOf(emptyList())
+        else dao.getAllForUser(username)
+    }.stateIn(viewModelScope, SharingStarted.WhileSubscribed(5000), emptyList())
+
+    // Tính toán số dư và tổng thu chi trong ViewModel để tối ưu hiệu năng
+    val balanceStats = transactions.map { list ->
+        val income = list.filter { it.type == "income" }.sumOf { it.amount }
+        val expense = list.filter { it.type == "expense" }.sumOf { it.amount }
+        Triple(income, expense, income - expense)
+    }.stateIn(viewModelScope, SharingStarted.WhileSubscribed(5000), Triple(0.0, 0.0, 0.0))
 
     fun add(title: String, amount: Double, type: String, category: String) {
         viewModelScope.launch {
