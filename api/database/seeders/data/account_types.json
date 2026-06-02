@@ -1,0 +1,26 @@
+[
+    {
+        "name": "General"
+    },
+    {
+        "name": "Cash"
+    },
+    {
+        "name": "Checking account"
+    },
+    {
+        "name": "Credit card"
+    },
+    {
+        "name": "Savings"
+    },
+    {
+        "name": "Investment"
+    },
+    {
+        "name": "Loan"
+    },
+    {
+        "name": "Mortgage"
+    }
+]

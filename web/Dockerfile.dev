@@ -1,0 +1,17 @@
+FROM node:21-slim 
+
+# Set the working directory inside the container 
+WORKDIR /var/www/html 
+
+# Copy package.json and package-lock.json to the container 
+COPY package*.json ./ 
+
+# Install dependencies 
+RUN npm ci 
+
+# Expose the port the app will run on 
+EXPOSE 3000 
+
+# Start the app in development mode 
+CMD ["npm", "run", "start"]
+

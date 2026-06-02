@@ -1,0 +1,54 @@
+FROM php:8.2-fpm-alpine3.17
+
+# Install cron
+RUN apk add --no-cache dcron
+
+# Install composer
+RUN curl -sS https://getcomposer.org/installer | php -- --install-dir=/usr/local/bin --filename=composer
+
+# Install gd and zip extensions
+RUN apk add --no-cache libpng-dev zlib-dev libzip-dev \
+    && docker-php-ext-install gd zip
+
+# Install other extensions
+RUN docker-php-ext-install mysqli pdo_mysql
+
+# Install memcached
+ENV MEMCACHED_DEPS zlib-dev libmemcached-dev cyrus-sasl-dev
+RUN apk add --no-cache --update libmemcached-libs zlib
+RUN set -xe \
+    && apk add --no-cache --update --virtual .phpize-deps $PHPIZE_DEPS \
+    && apk add --no-cache --update --virtual .memcached-deps $MEMCACHED_DEPS \
+    && pecl install memcached \
+    && echo "extension=memcached.so" > /usr/local/etc/php/conf.d/20_memcached.ini \
+    && rm -rf /usr/share/php7 \
+    && rm -rf /tmp/* \
+    && apk del .memcached-deps .phpize-deps
+
+# Install Python, pip, and build dependencies
+RUN apk add --no-cache python3 py3-pip python3-dev build-base \
+    && apk add --no-cache gcc g++ musl-dev libffi-dev make \
+    && apk add --no-cache openblas-dev lapack-dev \
+    && apk add --no-cache gfortran
+
+# Install Python dependencies
+RUN pip3 install --no-cache-dir scikit-learn joblib
+
+# Set working directory
+WORKDIR /var/www/html
+
+# Copy the application files
+COPY . .
+
+# Set permissions
+RUN chmod -R 775 storage bootstrap/cache \
+    && chown -R www-data:www-data storage bootstrap/cache
+
+RUN chown www-data:www-data ./entrypoint.sh \
+    && chmod +x ./entrypoint.sh
+
+# Change the user to www-data
+USER www-data
+
+# Install dependencies
+RUN composer install --no-dev --optimize-autoloader
