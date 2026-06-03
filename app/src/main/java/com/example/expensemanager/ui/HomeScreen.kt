@@ -10,7 +10,6 @@ import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.items
 import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
-import androidx.compose.foundation.text.KeyboardOptions
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.filled.*
 import androidx.compose.material3.*
@@ -20,17 +19,11 @@ import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.vector.ImageVector
-import androidx.compose.ui.graphics.vector.rememberVectorPainter
-import androidx.compose.ui.graphics.vector.rememberVectorPainter
-import androidx.compose.ui.graphics.vector.rememberVectorPainter
 import androidx.compose.ui.layout.ContentScale
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.text.font.FontWeight
-import androidx.compose.ui.text.input.KeyboardType
-import androidx.compose.ui.text.input.PasswordVisualTransformation
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
-import androidx.compose.ui.text.style.TextAlign
 import coil.compose.AsyncImage
 import coil.request.ImageRequest
 import com.example.expensemanager.data.Transaction
@@ -54,6 +47,9 @@ fun HomeScreen(
     val username by viewModel.currentUsername.collectAsState()
     val stats by viewModel.balanceStats.collectAsState()
     
+    // State để theo dõi thay đổi avatar để UI cập nhật ngay lập tức
+    var currentAvatarPath by remember(username) { mutableStateOf(prefs.getAvatarUri(username)) }
+    
     val photoPickerLauncher = rememberLauncherForActivityResult(
         contract = ActivityResultContracts.GetContent()
     ) { uri ->
@@ -61,6 +57,7 @@ fun HomeScreen(
             val savedPath = ImageStorageHelper.saveImageToInternalStorage(context, it, "avatars")
             if (savedPath != null) {
                 prefs.saveAvatarUri(username, savedPath)
+                currentAvatarPath = savedPath
                 Toast.makeText(context, "Đã cập nhật ảnh chân dung", Toast.LENGTH_SHORT).show()
             }
         }
@@ -70,8 +67,35 @@ fun HomeScreen(
         contract = ActivityResultContracts.TakePicturePreview()
     ) { bitmap ->
         if (bitmap != null) {
-            Toast.makeText(context, "Tính năng chụp ảnh đang được hoàn thiện", Toast.LENGTH_SHORT).show()
+            val savedPath = ImageStorageHelper.saveBitmapToInternalStorage(context, bitmap, "avatars")
+            if (savedPath != null) {
+                prefs.saveAvatarUri(username, savedPath)
+                currentAvatarPath = savedPath
+                Toast.makeText(context, "Đã cập nhật ảnh Face ID từ Camera", Toast.LENGTH_SHORT).show()
+            }
         }
+    }
+
+    var showPhotoOptions by remember { mutableStateOf(false) }
+    
+    if (showPhotoOptions) {
+        AlertDialog(
+            onDismissRequest = { showPhotoOptions = false },
+            title = { Text("Cập nhật ảnh Face ID") },
+            text = { Text("Chọn ảnh từ thư viện hoặc chụp ảnh mới để làm mẫu đối soát Face ID.") },
+            confirmButton = {
+                TextButton(onClick = { 
+                    cameraLauncher.launch(null)
+                    showPhotoOptions = false 
+                }) { Text("Chụp ảnh") }
+            },
+            dismissButton = {
+                TextButton(onClick = { 
+                    photoPickerLauncher.launch("image/*")
+                    showPhotoOptions = false 
+                }) { Text("Thư viện") }
+            }
+        )
     }
     
     val (totalIncome, totalExpense, balance) = stats
@@ -82,61 +106,117 @@ fun HomeScreen(
     var isSimulatingFaceID by remember { mutableStateOf(false) }
 
     if (showPinDialog) {
+        // Lấy ảnh riêng biệt của từng User từ Database
+        var matchProgress by remember { mutableStateOf(0f) }
+
         AlertDialog(
             onDismissRequest = { 
                 showPinDialog = false 
                 isSimulatingFaceID = false
             },
-            title = { Text(if (isSimulatingFaceID) "Đang nhận diện khuôn mặt..." else "Xác thực quyền truy cập") },
+            title = { 
+                Text(
+                    if (isSimulatingFaceID) "Xác thực danh tính chủ sở hữu" else "Bảo mật tài khoản",
+                    fontWeight = FontWeight.Bold
+                ) 
+            },
             text = {
                 var pinInput by remember { mutableStateOf("") }
-                val userAvatar = remember { prefs.getAvatarUri(username) }
 
                 Column(
                     modifier = Modifier.fillMaxWidth(),
                     horizontalAlignment = Alignment.CenterHorizontally
                 ) {
                     if (isSimulatingFaceID) {
-                        // Hiển thị ảnh khuôn mặt để giả lập FaceID
-                        Box(
-                            modifier = Modifier
-                                .size(150.dp)
-                                .clip(CircleShape)
-                                .background(Color.LightGray),
-                            contentAlignment = Alignment.Center
-                        ) {
-                            // Ưu tiên: 1. Ảnh đã chọn, 2. Icon mặc định
-                            val faceModel = userAvatar ?: Icons.Default.Face
+                        // GIAO DIỆN ĐỐI SOÁT KHUÔN MẶT
+                        Box(contentAlignment = Alignment.Center) {
+                            // Vòng tròn chứa ảnh đại diện của User đang đăng nhập
+                            Box(
+                                modifier = Modifier
+                                    .size(160.dp)
+                                    .clip(CircleShape)
+                                    .background(Color.LightGray.copy(alpha = 0.2f))
+                                    .padding(4.dp),
+                                contentAlignment = Alignment.Center
+                            ) {
+                                if (currentAvatarPath != null) {
+                                    AsyncImage(
+                                        model = currentAvatarPath,
+                                        contentDescription = "Registered Face",
+                                        modifier = Modifier.fillMaxSize().clip(CircleShape),
+                                        contentScale = ContentScale.Crop
+                                    )
+                                } else {
+                                    Icon(Icons.Default.Person, null, modifier = Modifier.size(80.dp), tint = Color.Gray)
+                                }
+                            }
                             
-                            AsyncImage(
-                                model = faceModel,
-                                contentDescription = null,
-                                modifier = Modifier.fillMaxSize(),
-                                contentScale = ContentScale.Crop,
-                                error = rememberVectorPainter(Icons.Default.AccountCircle)
-                            )
-                            
-                            // Hiệu ứng vòng tròn quét
+                            // Hiệu ứng vòng quét laser (mô phỏng đối soát)
                             CircularProgressIndicator(
-                                modifier = Modifier.size(150.dp),
-                                color = MaterialTheme.colorScheme.primary,
-                                strokeWidth = 4.dp
+                                progress = matchProgress,
+                                modifier = Modifier.size(170.dp),
+                                color = if (matchProgress >= 1f) Color(0xFF4CAF50) else MaterialTheme.colorScheme.primary,
+                                strokeWidth = 6.dp
                             )
                         }
-                        Spacer(modifier = Modifier.height(16.dp))
-                        Text("Vui lòng nhìn thẳng vào camera máy ảo", fontSize = 12.sp, color = Color.Gray)
+
+                        Spacer(modifier = Modifier.height(20.dp))
+                        Text(
+                            text = "Đang so khớp với dữ liệu của: $username",
+                            fontSize = 14.sp,
+                            fontWeight = FontWeight.Bold
+                        )
+                        Text(
+                            text = if (matchProgress < 1f) "Đang phân tích đặc điểm khuôn mặt..." else "Đã khớp 100% - Danh tính xác thực",
+                            fontSize = 12.sp,
+                            color = if (matchProgress >= 1f) Color(0xFF4CAF50) else Color.Gray
+                        )
                         
-                        // Sau 2 giây tự động báo thành công (Giả lập)
-                        LaunchedEffect(Unit) {
-                            kotlinx.coroutines.delay(2000)
-                            isBalanceVisible = true
-                            showPinDialog = false
-                            isSimulatingFaceID = false
-                            Toast.makeText(context, "Xác thực khuôn mặt thành công!", Toast.LENGTH_SHORT).show()
+                        // Logic mô phỏng việc so sánh (Verification)
+                        LaunchedEffect(isSimulatingFaceID) {
+                            if (isSimulatingFaceID) {
+                                for (i in 1..100) {
+                                    kotlinx.coroutines.delay(20)
+                                    matchProgress = i / 100f
+                                }
+                                
+                                // Kiểm tra xem người dùng hiện tại có ảnh trong database không
+                                if (currentAvatarPath != null) {
+                                    // Hiệu ứng rung khi hoàn tất 100%
+                                    try {
+                                        val vibrator = context.getSystemService(android.os.Vibrator::class.java)
+                                        if (vibrator != null) {
+                                            if (android.os.Build.VERSION.SDK_INT >= android.os.Build.VERSION_CODES.O) {
+                                                vibrator.vibrate(android.os.VibrationEffect.createOneShot(200, android.os.VibrationEffect.DEFAULT_AMPLITUDE))
+                                            } else {
+                                                @Suppress("DEPRECATION")
+                                                vibrator.vibrate(200)
+                                            }
+                                        }
+                                        
+                                        // Hiệu ứng âm thanh hệ thống (Success)
+                                        val notification = android.media.RingtoneManager.getDefaultUri(android.media.RingtoneManager.TYPE_NOTIFICATION)
+                                        val r = android.media.RingtoneManager.getRingtone(context, notification)
+                                        r.play()
+                                    } catch (e: Exception) {
+                                        android.util.Log.e("Feedback", "Error providing feedback: ${e.message}")
+                                    }
+
+                                    isBalanceVisible = true
+                                    kotlinx.coroutines.delay(800)
+                                    showPinDialog = false
+                                    isSimulatingFaceID = false
+                                    Toast.makeText(context, "Chào mừng $username quay trở lại!", Toast.LENGTH_SHORT).show()
+                                } else {
+                                    isSimulatingFaceID = false
+                                    Toast.makeText(context, "Lỗi: Bạn chưa đăng ký khuôn mặt cho tài khoản này!", Toast.LENGTH_LONG).show()
+                                }
+                            }
                         }
                     } else {
-                        Text("Nhập mã PIN hoặc sử dụng khuôn mặt để xem số dư", textAlign = TextAlign.Center)
-                        Spacer(modifier = Modifier.height(24.dp))
+                        // Giao diện nhập PIN cũ
+                        Text("Chủ tài khoản: $username", fontSize = 14.sp, color = Color.Gray)
+                        Spacer(modifier = Modifier.height(20.dp))
                         PinInput(
                             value = pinInput,
                             onValueChange = { pinInput = it }
@@ -148,7 +228,7 @@ fun HomeScreen(
                                     isBalanceVisible = true
                                     showPinDialog = false
                                 } else {
-                                    Toast.makeText(context, "Mã PIN không đúng", Toast.LENGTH_SHORT).show()
+                                    Toast.makeText(context, "Mã PIN không khớp với tài khoản", Toast.LENGTH_SHORT).show()
                                     pinInput = ""
                                 }
                             }
@@ -158,19 +238,26 @@ fun HomeScreen(
             },
             confirmButton = {
                 if (!isSimulatingFaceID) {
-                    Button(onClick = {
-                        val biometricHelper = com.example.expensemanager.security.BiometricHelper(context)
-                        if (biometricHelper.isBiometricAvailable()) {
-                            // Nếu là máy thật có FaceID, gọi hàng thật
-                            onAuthenticate {
-                                isBalanceVisible = true
-                                showPinDialog = false
+                    Button(
+                        onClick = {
+                            val hasFace = prefs.getAvatarUri(username) != null
+                            if (!hasFace) {
+                                Toast.makeText(context, "Vui lòng đăng ký Face ID trong Profile trước!", Toast.LENGTH_LONG).show()
+                            } else {
+                                val biometricHelper = com.example.expensemanager.security.BiometricHelper(context)
+                                if (biometricHelper.isBiometricAvailable()) {
+                                    onAuthenticate {
+                                        isBalanceVisible = true
+                                        showPinDialog = false
+                                    }
+                                } else {
+                                    matchProgress = 0f
+                                    isSimulatingFaceID = true
+                                }
                             }
-                        } else {
-                            // Nếu là máy ảo, bật chế độ mô phỏng bằng ảnh
-                            isSimulatingFaceID = true
-                        }
-                    }) {
+                        },
+                        colors = ButtonDefaults.buttonColors(containerColor = MaterialTheme.colorScheme.primary)
+                    ) {
                         Icon(Icons.Default.Face, null)
                         Spacer(Modifier.width(8.dp))
                         Text("Dùng Face ID")
@@ -189,14 +276,13 @@ fun HomeScreen(
         topBar = {
             CenterAlignedTopAppBar(
                 title = { 
-                    val userAvatar = remember { prefs.getAvatarUri(username) }
                     Row(
                         verticalAlignment = Alignment.CenterVertically,
-                        modifier = Modifier.clickable { photoPickerLauncher.launch("image/*") }
+                        modifier = Modifier.clickable { showPhotoOptions = true }
                     ) {
-                        if (userAvatar != null) {
+                        if (currentAvatarPath != null) {
                             AsyncImage(
-                                model = userAvatar,
+                                model = currentAvatarPath,
                                 contentDescription = null,
                                 modifier = Modifier
                                     .size(32.dp)
@@ -285,7 +371,12 @@ fun HomeScreen(
                     TransactionItem(
                         transaction = transaction,
                         onDelete = { viewModel.delete(transaction) },
-                        onEdit = { editingTransaction = transaction }
+                        onEdit = { editingTransaction = transaction },
+                        onSetAsAvatar = { path ->
+                            prefs.saveAvatarUri(username, path)
+                            currentAvatarPath = path
+                            Toast.makeText(context, "Đã dùng ảnh giao dịch này làm Face ID", Toast.LENGTH_SHORT).show()
+                        }
                     )
                 }
             }
@@ -332,7 +423,7 @@ fun SummaryItem(label: String, amount: Double, icon: ImageVector, color: Color, 
 }
 
 @Composable
-fun TransactionItem(transaction: Transaction, onDelete: () -> Unit, onEdit: () -> Unit) {
+fun TransactionItem(transaction: Transaction, onDelete: () -> Unit, onEdit: () -> Unit, onSetAsAvatar: (String) -> Unit) {
     Card(
         modifier = Modifier.fillMaxWidth(),
         shape = RoundedCornerShape(12.dp)
@@ -391,6 +482,11 @@ fun TransactionItem(transaction: Transaction, onDelete: () -> Unit, onEdit: () -
                     fontWeight = FontWeight.Bold
                 )
                 Row {
+                    if (!transaction.imagePath.isNullOrEmpty()) {
+                        IconButton(onClick = { onSetAsAvatar(transaction.imagePath) }, modifier = Modifier.size(24.dp)) {
+                            Icon(Icons.Default.Face, contentDescription = "FaceID", tint = MaterialTheme.colorScheme.primary, modifier = Modifier.size(16.dp))
+                        }
+                    }
                     IconButton(onClick = onEdit, modifier = Modifier.size(24.dp)) {
                         Icon(Icons.Default.Edit, contentDescription = "Edit", tint = Color.Gray, modifier = Modifier.size(16.dp))
                     }

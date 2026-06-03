@@ -35,4 +35,22 @@ object ImageStorageHelper {
             null
         }
     }
+
+    fun saveBitmapToInternalStorage(context: Context, bitmap: Bitmap, folderName: String): String? {
+        return try {
+            val fileName = "${folderName}_${UUID.randomUUID()}.jpg"
+            val directory = File(context.filesDir, folderName)
+            if (!directory.exists()) directory.mkdirs()
+
+            val file = File(directory, fileName)
+            val outputStream = FileOutputStream(file)
+            bitmap.compress(Bitmap.CompressFormat.JPEG, 100, outputStream)
+            outputStream.flush()
+            outputStream.close()
+            file.absolutePath
+        } catch (e: Exception) {
+            e.printStackTrace()
+            null
+        }
+    }
 }

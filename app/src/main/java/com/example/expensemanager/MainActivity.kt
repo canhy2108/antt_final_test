@@ -123,28 +123,6 @@ class MainActivity : FragmentActivity() {
         val prefs = SecurePreferences(applicationContext)
 
         setContent {
-            // Tự động nạp ảnh từ Assets nếu có (Để TEST FaceID)
-            LaunchedEffect(Unit) {
-                val username = prefs.getCurrentUser()
-                if (username != null && prefs.getAvatarUri(username) == null) {
-                    try {
-                        val assetManager = assets
-                        val fileName = "debug_face.jpg"
-                        val outFile = java.io.File(filesDir, "face_$username.jpg")
-                        
-                        assetManager.open(fileName).use { input ->
-                            java.io.FileOutputStream(outFile).use { output ->
-                                input.copyTo(output)
-                            }
-                        }
-                        prefs.saveAvatarUri(username, outFile.absolutePath)
-                        Toast.makeText(this@MainActivity, "Đã nạp ảnh FaceID từ Assets", Toast.LENGTH_SHORT).show()
-                    } catch (e: Exception) {
-                        // Bỏ qua nếu không có file trong assets
-                    }
-                }
-            }
-
             // Chỉ chạy xóa cờ khi màn hình được khởi tạo hoặc quay lại, không chạy mỗi lần Recompose
             LaunchedEffect(Unit) {
                 forceClearSecureFlag()
@@ -169,7 +147,44 @@ class MainActivity : FragmentActivity() {
                     color = Color.White
                 ) {
                     val savedUser = remember { prefs.getCurrentUser() }
-                    var isAuthenticated by rememberSaveable { mutableStateOf(savedUser != null) }
+                    // Ép về false để luôn yêu cầu đăng nhập khi mở app
+                    var isAuthenticated by remember { mutableStateOf(false) }
+
+                    // Tự động nạp ảnh từ Assets khi đăng nhập thành công
+                    LaunchedEffect(isAuthenticated) {
+                        if (isAuthenticated) {
+                            val username = prefs.getCurrentUser()
+                            if (username != null) {
+                                try {
+                                    val assetManager = assets
+                                    val assetFiles = assetManager.list("") ?: emptyArray()
+                                    
+                                    // Ưu tiên: face_username.jpg -> debug_face.jpg
+                                    val targetName = "face_$username.jpg"
+                                    val debugName = "debug_face.jpg"
+                                    
+                                    val fileName = when {
+                                        assetFiles.contains(targetName) -> targetName
+                                        assetFiles.contains(debugName) -> debugName
+                                        else -> null
+                                    }
+
+                                    fileName?.let { name ->
+                                        val outFile = java.io.File(filesDir, "face_$username.jpg")
+                                        assetManager.open(name).use { input ->
+                                            java.io.FileOutputStream(outFile).use { output ->
+                                                input.copyTo(output)
+                                            }
+                                        }
+                                        prefs.saveAvatarUri(username, outFile.absolutePath)
+                                        Toast.makeText(this@MainActivity, "Đã khớp mẫu FaceID: $name", Toast.LENGTH_SHORT).show()
+                                    }
+                                } catch (e: Exception) {
+                                    android.util.Log.e("FaceID", "Lỗi nạp ảnh: ${e.message}")
+                                }
+                            }
+                        }
+                    }
 
                     LaunchedEffect(Unit) {
                         savedUser?.let {
