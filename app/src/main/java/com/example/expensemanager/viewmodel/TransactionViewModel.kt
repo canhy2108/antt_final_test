@@ -31,7 +31,7 @@ class TransactionViewModel(private val dao: TransactionDao) : ViewModel() {
         Triple(income, expense, income - expense)
     }.stateIn(viewModelScope, SharingStarted.WhileSubscribed(5000), Triple(0.0, 0.0, 0.0))
 
-    fun add(title: String, amount: Double, type: String, category: String) {
+    fun add(title: String, amount: Double, type: String, category: String, imagePath: String? = null) {
         viewModelScope.launch {
             dao.insert(
                 Transaction(
@@ -40,7 +40,8 @@ class TransactionViewModel(private val dao: TransactionDao) : ViewModel() {
                     amount = amount,
                     type = type,
                     category = category,
-                    date = System.currentTimeMillis()
+                    date = System.currentTimeMillis(),
+                    imagePath = imagePath
                 )
             )
         }

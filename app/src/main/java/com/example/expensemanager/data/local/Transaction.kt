@@ -7,10 +7,11 @@ import androidx.room.PrimaryKey
 data class Transaction(
     @PrimaryKey(autoGenerate = true)
     val id: Int = 0,
-    val username: String, // Thêm trường này để phân biệt dữ liệu giữa các người dùng
+    val username: String,
     val title: String,
     val amount: Double,
     val type: String, // "income" hoặc "expense"
     val category: String,
-    val date: Long
+    val date: Long,
+    val imagePath: String? = null // Thêm trường này để lưu đường dẫn ảnh hóa đơn
 )

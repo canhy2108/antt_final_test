@@ -41,7 +41,7 @@ public final class TransactionDao_Impl implements TransactionDao {
       @Override
       @NonNull
       protected String createQuery() {
-        return "INSERT OR ABORT INTO `transactions` (`id`,`username`,`title`,`amount`,`type`,`category`,`date`) VALUES (nullif(?, 0),?,?,?,?,?,?)";
+        return "INSERT OR ABORT INTO `transactions` (`id`,`username`,`title`,`amount`,`type`,`category`,`date`,`imagePath`) VALUES (nullif(?, 0),?,?,?,?,?,?,?)";
       }
 
       @Override
@@ -70,6 +70,11 @@ public final class TransactionDao_Impl implements TransactionDao {
           statement.bindString(6, entity.getCategory());
         }
         statement.bindLong(7, entity.getDate());
+        if (entity.getImagePath() == null) {
+          statement.bindNull(8);
+        } else {
+          statement.bindString(8, entity.getImagePath());
+        }
       }
     };
     this.__deletionAdapterOfTransaction = new EntityDeletionOrUpdateAdapter<Transaction>(__db) {
@@ -89,7 +94,7 @@ public final class TransactionDao_Impl implements TransactionDao {
       @Override
       @NonNull
       protected String createQuery() {
-        return "UPDATE OR ABORT `transactions` SET `id` = ?,`username` = ?,`title` = ?,`amount` = ?,`type` = ?,`category` = ?,`date` = ? WHERE `id` = ?";
+        return "UPDATE OR ABORT `transactions` SET `id` = ?,`username` = ?,`title` = ?,`amount` = ?,`type` = ?,`category` = ?,`date` = ?,`imagePath` = ? WHERE `id` = ?";
       }
 
       @Override
@@ -118,7 +123,12 @@ public final class TransactionDao_Impl implements TransactionDao {
           statement.bindString(6, entity.getCategory());
         }
         statement.bindLong(7, entity.getDate());
-        statement.bindLong(8, entity.getId());
+        if (entity.getImagePath() == null) {
+          statement.bindNull(8);
+        } else {
+          statement.bindString(8, entity.getImagePath());
+        }
+        statement.bindLong(9, entity.getId());
       }
     };
   }
@@ -203,6 +213,7 @@ public final class TransactionDao_Impl implements TransactionDao {
           final int _cursorIndexOfType = CursorUtil.getColumnIndexOrThrow(_cursor, "type");
           final int _cursorIndexOfCategory = CursorUtil.getColumnIndexOrThrow(_cursor, "category");
           final int _cursorIndexOfDate = CursorUtil.getColumnIndexOrThrow(_cursor, "date");
+          final int _cursorIndexOfImagePath = CursorUtil.getColumnIndexOrThrow(_cursor, "imagePath");
           final List<Transaction> _result = new ArrayList<Transaction>(_cursor.getCount());
           while (_cursor.moveToNext()) {
             final Transaction _item;
@@ -236,7 +247,13 @@ public final class TransactionDao_Impl implements TransactionDao {
             }
             final long _tmpDate;
             _tmpDate = _cursor.getLong(_cursorIndexOfDate);
-            _item = new Transaction(_tmpId,_tmpUsername,_tmpTitle,_tmpAmount,_tmpType,_tmpCategory,_tmpDate);
+            final String _tmpImagePath;
+            if (_cursor.isNull(_cursorIndexOfImagePath)) {
+              _tmpImagePath = null;
+            } else {
+              _tmpImagePath = _cursor.getString(_cursorIndexOfImagePath);
+            }
+            _item = new Transaction(_tmpId,_tmpUsername,_tmpTitle,_tmpAmount,_tmpType,_tmpCategory,_tmpDate,_tmpImagePath);
             _result.add(_item);
           }
           return _result;
