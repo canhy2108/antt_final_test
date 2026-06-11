@@ -1,14 +1,73 @@
 import axios, { AxiosInstance } from 'axios';
 import Constants from 'expo-constants';
+import { Platform } from 'react-native';
 import { router } from 'expo-router';
 import { secureStorage } from '@/services/secureStorage';
 
-// LAN IP của máy dev — mobile device phải reach được URL này. Khi
-// thay đổi network, sửa ở đây hoặc set EXPO_PUBLIC_API_URL trong env.
+/** Backend port — Laravel `php artisan serve` defaults to 8000. */
+const API_PORT = 8000;
+
+/**
+ * Auto-detect the dev PC's LAN IP from the Metro dev server.
+ *
+ * When the phone scans the QR code in Expo Go, Metro hands back a
+ * `hostUri` like `192.168.1.10:8081`. That IP is, by definition, the
+ * dev PC reachable from the phone right now — exactly what we need for
+ * the API base URL. Reusing it means we don't have to ask the user to
+ * find their own IP every time they move to a new Wi-Fi.
+ *
+ * Returns null when:
+ *   - Built for production (no Metro)
+ *   - Running on web (use the page origin instead)
+ *   - Running via tunnel (hostUri is an .exp.direct domain — useless
+ *     for the Laravel backend, fall through to the manual env)
+ */
+function deriveApiUrlFromMetro(): string | null {
+  if (Platform.OS === 'web') return null;
+
+  const hostUri =
+    (Constants.expoConfig as { hostUri?: string } | null)?.hostUri ??
+    (Constants.expoGoConfig as { hostUri?: string } | null)?.hostUri ??
+    Constants.linkingUri?.split('://')[1]?.split('/')[0] ??
+    null;
+
+  if (!hostUri) return null;
+
+  // Strip the Metro port and any trailing path.
+  const hostOnly = hostUri.split('/')[0].split(':')[0];
+
+  // Tunnel mode → host is something like `abc-xyz.exp.direct`. The
+  // backend cannot be reached on port 8000 of that host, so don't try.
+  if (!hostOnly || hostOnly.includes('exp.direct') || hostOnly.includes('ngrok')) {
+    return null;
+  }
+
+  // IPv4 sanity check — anything else (IPv6, raw hostname) falls back.
+  if (!/^\d+\.\d+\.\d+\.\d+$/.test(hostOnly)) return null;
+
+  return `http://${hostOnly}:${API_PORT}/api`;
+}
+
+/**
+ * Resolution order:
+ *   1. `EXPO_PUBLIC_API_URL` env (set in .env or shell) — explicit override.
+ *   2. `extra.apiUrl` in app.json — for staged builds.
+ *   3. Auto-detected from Metro dev server — works on any Wi-Fi without
+ *      the developer typing an IP.
+ *   4. `http://localhost:8000/api` — last-ditch fallback for web/sim.
+ */
 const API_URL =
-  (Constants.expoConfig?.extra?.apiUrl as string | undefined) ??
   process.env.EXPO_PUBLIC_API_URL ??
-  'http://192.168.1.10:8000/api';
+  (Constants.expoConfig?.extra?.apiUrl as string | undefined) ??
+  deriveApiUrlFromMetro() ??
+  `http://localhost:${API_PORT}/api`;
+
+if (__DEV__) {
+  // Surface the chosen URL once at boot so debugging cross-network
+  // issues from device logs is straightforward.
+  // eslint-disable-next-line no-console
+  console.log('[api] baseURL =', API_URL);
+}
 
 export const apiClient: AxiosInstance = axios.create({
   baseURL: API_URL,
