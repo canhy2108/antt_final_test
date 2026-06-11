@@ -20,9 +20,12 @@ import { PrimaryButton } from '@/components/PrimaryButton';
 import { secureStorage } from '@/services/secureStorage';
 import { userBiometricService } from '@/services/userBiometric';
 import { biometricApi } from '@/api/biometric';
+import { biometricService } from '@/services/biometric';
 import { usePrefs } from '@/stores/prefs';
 import { authApi } from '@/api/auth';
 import { haptic } from '@/utils/haptics';
+import { openOsBiometricSettings, osBiometricSettingsHint } from '@/utils/biometricSettings';
+import { Alert } from 'react-native';
 
 /**
  * Face enrolment — LIVE scan with a silent capture at the end.
@@ -114,6 +117,29 @@ export default function FaceScanScreen() {
       await authApi.login(email, password);
       // No local password caching — see userBiometric.ts. The OS-biometric
       // gated bio_token in secureKeystore is the actual auth factor.
+
+      // OS gate: BudgetBee can't save the bio_token behind a biometric ACL
+      // if the device has no Face ID / Face Unlock enrolled. Send the user
+      // to Settings before they hit the failing enrol screen.
+      const cap = await biometricService.getCapability();
+      if (cap === 'unavailable') {
+        Alert.alert(
+          'Thiết bị chưa bật khuôn mặt',
+          'Để dùng đăng nhập khuôn mặt BudgetBee, bạn cần bật Face ID / Face Unlock trong Cài đặt thiết bị trước.\n\n' +
+            osBiometricSettingsHint(),
+          [
+            { text: 'Để sau', style: 'cancel' },
+            {
+              text: 'Mở Cài đặt',
+              onPress: async () => {
+                await openOsBiometricSettings();
+              },
+            },
+          ],
+        );
+        return;
+      }
+
       haptic.success();
       setPhase('positioning');
     } catch (e: any) {

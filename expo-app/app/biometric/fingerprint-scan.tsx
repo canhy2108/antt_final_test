@@ -19,9 +19,12 @@ import { PrimaryButton } from '@/components/PrimaryButton';
 import { secureStorage } from '@/services/secureStorage';
 import { userBiometricService } from '@/services/userBiometric';
 import { biometricApi } from '@/api/biometric';
+import { biometricService } from '@/services/biometric';
 import { usePrefs } from '@/stores/prefs';
 import { authApi } from '@/api/auth';
 import { haptic } from '@/utils/haptics';
+import { openOsBiometricSettings, osBiometricSettingsHint } from '@/utils/biometricSettings';
+import { Alert } from 'react-native';
 
 /**
  * Fingerprint enrolment — *simulated* press-and-hold. Mobile OSes don't
@@ -92,6 +95,31 @@ export default function FingerprintScanScreen() {
     try {
       await authApi.login(email, password);
       // No local password caching — see userBiometric.ts.
+
+      // OS gate: even if the password is right, the next step (saving the
+      // bio_token into Keystore behind a biometric ACL) requires the
+      // device to have at least one fingerprint enrolled in the OS. If
+      // not, send the user to Settings instead of failing on the next
+      // screen.
+      const cap = await biometricService.getCapability();
+      if (cap === 'unavailable') {
+        Alert.alert(
+          'Thiết bị chưa đăng ký vân tay',
+          'Để dùng đăng nhập vân tay BudgetBee, bạn cần bật vân tay trong Cài đặt thiết bị trước.\n\n' +
+            osBiometricSettingsHint(),
+          [
+            { text: 'Để sau', style: 'cancel' },
+            {
+              text: 'Mở Cài đặt',
+              onPress: async () => {
+                await openOsBiometricSettings();
+              },
+            },
+          ],
+        );
+        return;
+      }
+
       haptic.success();
       setPhase('idle');
     } catch (e: any) {

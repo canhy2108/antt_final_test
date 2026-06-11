@@ -6,8 +6,10 @@ import { SafeAreaView } from 'react-native-safe-area-context';
 import { Colors, Typography, Space, Radius } from '@/theme';
 import { PrimaryButton } from '@/components/PrimaryButton';
 import { biometricApi } from '@/api/biometric';
+import { biometricService } from '@/services/biometric';
 import { useAuth } from '@/stores/auth';
 import { haptic } from '@/utils/haptics';
+import { openOsBiometricSettings, osBiometricSettingsHint } from '@/utils/biometricSettings';
 
 /**
  * Fingerprint login — single-prompt UX.
@@ -23,12 +25,12 @@ import { haptic } from '@/utils/haptics';
  * `startedRef` guards against React strict-mode / fast-refresh double effects
  * which would otherwise stack two OS prompts in quick succession.
  */
-type Phase = 'authenticating' | 'success' | 'failed';
+type Phase = 'checking' | 'os-not-enrolled' | 'authenticating' | 'success' | 'failed';
 
 export default function FingerLoginScreen() {
   const setUser = useAuth((s) => s.setUser);
 
-  const [phase, setPhase] = useState<Phase>('authenticating');
+  const [phase, setPhase] = useState<Phase>('checking');
   const [matchedEmail, setMatchedEmail] = useState<string | null>(null);
   const [errorText, setErrorText] = useState<string | null>(null);
   const startedRef = useRef(false);
@@ -38,12 +40,22 @@ export default function FingerLoginScreen() {
   useEffect(() => {
     if (startedRef.current) return;
     startedRef.current = true;
-    runOsBiometricLogin();
+    // Pre-flight: if the device has no fingerprint enrolled at the OS
+    // level, the OS prompt returns "not_enrolled" immediately. Better to
+    // detect that ahead of time and send the user straight to Settings.
+    (async () => {
+      const cap = await biometricService.getCapability();
+      if (cap === 'unavailable') {
+        setPhase('os-not-enrolled');
+        return;
+      }
+      runOsBiometricLogin();
+    })();
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
 
   useEffect(() => {
-    if (phase !== 'authenticating') {
+    if (phase !== 'authenticating' && phase !== 'checking') {
       pulse.stopAnimation();
       pulse.setValue(0);
       return;
@@ -82,6 +94,81 @@ export default function FingerLoginScreen() {
     runOsBiometricLogin();
   }
 
+  async function recheckOsCapability() {
+    const cap = await biometricService.getCapability();
+    if (cap === 'unavailable') {
+      setPhase('os-not-enrolled');
+      return;
+    }
+    runOsBiometricLogin();
+  }
+
+  if (phase === 'os-not-enrolled') {
+    return (
+      <SafeAreaView style={styles.bg} edges={['top']}>
+        <StatusBar barStyle="light-content" />
+        <View style={styles.topBar}>
+          <Pressable onPress={() => router.back()} hitSlop={12}>
+            <Ionicons name="close" size={28} color={Colors.white} />
+          </Pressable>
+          <Text style={[Typography.headingM, { color: Colors.white }]}>Đăng nhập vân tay</Text>
+          <View style={{ width: 28 }} />
+        </View>
+
+        <View style={styles.center}>
+          <View
+            style={[
+              styles.fingerCircle,
+              { backgroundColor: 'rgba(245,158,11,0.12)', borderColor: '#F59E0B' },
+            ]}
+          >
+            <Ionicons name="warning" size={56} color="#F59E0B" />
+          </View>
+          <Text style={[Typography.headingL, { color: Colors.white, textAlign: 'center', marginTop: 32 }]}>
+            Thiết bị chưa đăng ký vân tay
+          </Text>
+          <Text
+            style={[
+              Typography.bodyM,
+              { color: 'rgba(255,255,255,0.7)', textAlign: 'center', marginTop: 8, paddingHorizontal: 24 },
+            ]}
+          >
+            Hệ điều hành chưa có vân tay nào, BudgetBee không thể quét. Hãy bật trong Cài đặt thiết bị trước.
+            {'\n\n'}
+            {osBiometricSettingsHint()}
+          </Text>
+          <View style={{ flexDirection: 'row', gap: 12, marginTop: Space.s24, paddingHorizontal: 24 }}>
+            <Pressable style={styles.secondaryBtn} onPress={() => router.back()}>
+              <Text style={[Typography.buttonM, { color: Colors.white }]}>Dùng mật khẩu</Text>
+            </Pressable>
+            <View style={{ flex: 1 }}>
+              <PrimaryButton
+                label="Mở Cài đặt"
+                onPress={async () => {
+                  const opened = await openOsBiometricSettings();
+                  if (!opened) {
+                    setErrorText('Không mở được Cài đặt. Vui lòng vào Cài đặt thủ công.');
+                  }
+                }}
+              />
+            </View>
+          </View>
+          <Pressable onPress={recheckOsCapability} style={{ marginTop: 16 }}>
+            <Text style={[Typography.buttonM, { color: Colors.primary }]}>
+              Tôi đã bật xong — Kiểm tra lại
+            </Text>
+          </Pressable>
+          {errorText ? (
+            <Text style={[Typography.bodyS, { color: Colors.expense, textAlign: 'center', marginTop: 12 }]}>
+              {errorText}
+            </Text>
+          ) : null}
+        </View>
+      </SafeAreaView>
+    );
+  }
+
+  const isChecking = phase === 'checking';
   const isAuthenticating = phase === 'authenticating';
   const isSuccess = phase === 'success';
   const isFailed = phase === 'failed';
@@ -93,8 +180,8 @@ export default function FingerLoginScreen() {
     <SafeAreaView style={styles.bg} edges={['top']}>
       <StatusBar barStyle="light-content" />
       <View style={styles.topBar}>
-        <Pressable onPress={() => router.back()} hitSlop={12} disabled={isAuthenticating}>
-          <Ionicons name="close" size={28} color={isAuthenticating ? 'rgba(255,255,255,0.3)' : Colors.white} />
+        <Pressable onPress={() => router.back()} hitSlop={12} disabled={isAuthenticating || isChecking}>
+          <Ionicons name="close" size={28} color={isAuthenticating || isChecking ? 'rgba(255,255,255,0.3)' : Colors.white} />
         </Pressable>
         <Text style={[Typography.headingM, { color: Colors.white }]}>Đăng nhập vân tay</Text>
         <View style={{ width: 28 }} />
@@ -108,11 +195,13 @@ export default function FingerLoginScreen() {
               : 'Đăng nhập thành công'
             : isFailed
             ? 'Xác thực vân tay thất bại'
+            : isChecking
+            ? 'Đang kiểm tra thiết bị'
             : 'Đang xác thực bằng vân tay'}
         </Text>
 
         <View style={styles.fingerHub}>
-          {isAuthenticating ? (
+          {isAuthenticating || isChecking ? (
             <Animated.View
               style={[styles.pulseRing, { transform: [{ scale: ringScale }], opacity: ringOpacity }]}
             />
