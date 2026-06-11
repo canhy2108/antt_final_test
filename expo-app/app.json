@@ -1,0 +1,58 @@
+{
+  "expo": {
+    "name": "BudgetBee",
+    "slug": "budgetbee",
+    "scheme": "budgetbee",
+    "version": "1.0.0",
+    "orientation": "portrait",
+    "icon": "./assets/icon.png",
+    "userInterfaceStyle": "light",
+    "ios": {
+      "supportsTablet": true,
+      "bundleIdentifier": "com.budgetbee.app",
+      "infoPlist": {
+        "NSCameraUsageDescription": "BudgetBee cần camera để xác minh eKYC.",
+        "NSFaceIDUsageDescription": "BudgetBee dùng Face ID để mở khoá ứng dụng."
+      }
+    },
+    "android": {
+      "package": "com.budgetbee.app",
+      "adaptiveIcon": {
+        "backgroundColor": "#BDE83E",
+        "foregroundImage": "./assets/android-icon-foreground.png",
+        "backgroundImage": "./assets/android-icon-background.png",
+        "monochromeImage": "./assets/android-icon-monochrome.png"
+      },
+      "predictiveBackGestureEnabled": false,
+      "permissions": [
+        "USE_BIOMETRIC",
+        "USE_FINGERPRINT",
+        "CAMERA"
+      ]
+    },
+    "web": {
+      "favicon": "./assets/favicon.png",
+      "bundler": "metro"
+    },
+    "plugins": [
+      "expo-router",
+      "expo-secure-store",
+      "expo-font",
+      [
+        "expo-camera",
+        {
+          "cameraPermission": "BudgetBee cần truy cập camera để xác minh eKYC."
+        }
+      ],
+      [
+        "expo-local-authentication",
+        {
+          "faceIDPermission": "BudgetBee dùng Face ID để mở khoá ứng dụng."
+        }
+      ]
+    ],
+    "experiments": {
+      "typedRoutes": true
+    }
+  }
+}
