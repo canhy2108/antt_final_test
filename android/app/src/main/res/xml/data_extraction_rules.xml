@@ -1,8 +1,0 @@
-<?xml version="1.0" encoding="utf-8"?>
-<data-extraction-rules>
-    <cloud-backup disableIfContentUriAccess="true">
-        <!-- Exclude sensitive files from backup -->
-        <exclude path="cache" />
-        <exclude path="app_*.db" />
-    </cloud-backup>
-</data-extraction-rules>

@@ -1,4 +1,36 @@
+# Secrets / local env
 .env
+.env.local
+
+# Dependencies
+node_modules/
 web/node_modules/
 web/dist/
 api/vendor/
+
+# IDE / editor
+.idea/
+.vscode/
+*.swp
+*.swo
+
+# OS
+.DS_Store
+Thumbs.db
+
+# Expo / Metro caches
+.expo/
+expo-app/.expo/
+expo-app/dist/
+.metro-health-check*
+
+# Logs
+*.log
+npm-debug.log*
+
+# Per-project ephemeral assistant scratchpads
+expo-app/.claude/
+
+# Old native Android scaffold (replaced by Expo)
+# (Already removed in the source tree; kept here so it stays gone.)
+android/.gradle/

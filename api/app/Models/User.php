@@ -25,20 +25,29 @@ class User extends Authenticatable
         'name',
         'email',
         'password',
-        'currency_id'
+        'currency_id',
+        'face_enrolled_at',
+        'fingerprint_enrolled_at',
+        'face_image_base64',
+        'face_scan_ms',
+        'fingerprint_hold_ms',
+        'last_login_at',
+        'login_count',
     ];
 
     protected $appends = ['currency_symbol'];
 
     /**
      * The attributes that should be hidden for serialization.
+     * face_image_base64 NEVER goes out in API responses.
      *
      * @var array<int, string>
      */
     protected $hidden = [
         'password',
         'remember_token',
-        'currency'
+        'currency',
+        'face_image_base64',
     ];
 
     /**
@@ -59,9 +68,11 @@ class User extends Authenticatable
             Log::info("Created {$user->getTable()} with ID {$user->id}");
             static::withoutEvents(function () use ($user) {
                 event(new UserCreated($user));
-                $defaultCurrency = Currency::where('code', 'USD')->first();
+                // BudgetBee là app VN — ưu tiên VND, fallback USD nếu seed thiếu.
+                $defaultCurrency = Currency::where('code', 'VND')->first()
+                    ?? Currency::where('code', 'USD')->first();
                 if (!$defaultCurrency) {
-                    Log::warning("Default USD currency missing — skipping UserCurrency seed for user {$user->id}");
+                    Log::warning("No default currency (VND/USD) found — skipping UserCurrency seed for user {$user->id}");
                     return;
                 }
                 $currency = UserCurrency::create([

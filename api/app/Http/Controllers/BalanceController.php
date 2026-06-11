@@ -34,28 +34,50 @@ class BalanceController extends Controller
 
     public function getAll(Request $request)
     {
-        $query = Record::filterByRequest($request);
-        $sql = $query->toSql();
-        $bindings = $query->getBindings();
-        $queryKey = md5($sql . serialize($bindings));
+        $user = $request->user();
 
-        $cacheKey = 'balance_all_data_' . $queryKey;
-        if (Cache::has($cacheKey)) {
-            return response()->json(Cache::get($cacheKey));
-        }
+        // BUGFIX: the previous implementation classified records into
+        // income/expense by checking whether their `category_id` belonged
+        // to the "Income" parent group (CATEGORY_PARENT_ID_INCOME=10).
+        // When a user picked an income transaction with a category that
+        // wasn't in that group, the sum stayed at 0 — hence "Thu nhập"
+        // on the dashboard never moved after creating income records.
+        // Classify by the `type` column instead, which is the source of
+        // truth. abs() smooths over storage sign convention (some
+        // legacy records store expense `amount` as a negative number).
+        $query = Record::filterByRequest($request);
 
         $queryIncome = clone $query;
         $queryExpense = clone $query;
 
-        $excludedCategoryIds = Category::where('parent_category_id', self::CATEGORY_PARENT_ID_INCOME)->pluck('id');
+        // Sum the raw `amount` column directly. The previous
+        // `amount_base_currency` accessor depends on CurrencyConverter
+        // which crashes on records whose currency relation is null,
+        // returning bogus tiny numbers like -4.25. For our VND-only
+        // setup amount == amount_base_currency anyway. If the app later
+        // supports true multi-currency, this becomes a per-record sum
+        // with explicit FX in PHP.
+        $incomeSum = abs((float) $queryIncome->where('type', 'income')->sum('amount'));
+        $expenseSum = abs((float) $queryExpense->where('type', 'expense')->sum('amount'));
+
+        // "Tổng số dư" = current balance across ALL accounts, NOT a
+        // period sum. This is independent of the date filter so the
+        // home screen always shows real wallet balance regardless of
+        // the report range selection.
+        $balanceSum = (float) Account::where('user_id', $user->id)
+            ->get()
+            ->sum('balance');
 
         $data = [
-            'incomes' => $queryIncome->whereIn('category_id', $excludedCategoryIds)->whereNot('type', 'transfer')->get()->sum('amount_base_currency'),
-            'expenses' => $queryExpense->whereNotIn('category_id', $excludedCategoryIds)->whereNot('type', 'transfer')->get()->sum('amount_base_currency'),
-            'currency_symbol' => $request->user()->currency_symbol
+            // Canonical keys the FE prefers
+            'income' => $incomeSum,
+            'expense' => $expenseSum,
+            'balance' => $balanceSum,
+            // Backward-compat aliases (legacy callers used "incomes"/"expenses")
+            'incomes' => $incomeSum,
+            'expenses' => $expenseSum,
+            'currency_symbol' => $user->currency_symbol,
         ];
-
-        Cache::put($cacheKey, $data);
 
         return response()->json($data);
     }

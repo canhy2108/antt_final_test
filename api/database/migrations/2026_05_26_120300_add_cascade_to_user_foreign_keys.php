@@ -20,6 +20,14 @@ return new class extends Migration
 {
     public function up(): void
     {
+        // SQLite cannot DROP FOREIGN KEY in-place — the migration is a no-op
+        // there. For dev SQLite, foreign-key cascade can be controlled via
+        // PRAGMA foreign_keys=ON; production MySQL still gets the proper
+        // cascade behavior this migration was written for.
+        if (\DB::connection()->getDriverName() === 'sqlite') {
+            return;
+        }
+
         $this->recreateUserFk('accounts');
         $this->recreateUserFk('records');
         $this->recreateUserFk('budgets');
@@ -32,6 +40,10 @@ return new class extends Migration
 
     public function down(): void
     {
+        if (\DB::connection()->getDriverName() === 'sqlite') {
+            return;
+        }
+
         foreach ([
             'accounts', 'records', 'budgets', 'upcoming_expenses',
             'imports', 'user_currencies', 'parent_categories', 'categories',

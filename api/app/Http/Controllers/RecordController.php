@@ -3,9 +3,11 @@
 namespace App\Http\Controllers;
 
 use Illuminate\Http\Request;
+use App\Models\Account;
 use App\Models\Record;
 use App\Models\Category;
 use DateTime;
+use Illuminate\Validation\ValidationException;
 
 class RecordController extends Controller
 {
@@ -67,13 +69,42 @@ class RecordController extends Controller
         return response()->json($data);
     }
 
-    public function getById($id)
+    public function getById(Request $request, $id)
     {
-        $record = Record::where('id', $id)->first();
+        $record = Record::find($id);
+
+        if (!$record) {
+            return response()->json(['message' => 'Record not found'], 404);
+        }
 
         $this->authorize('view', $record);
 
         return response()->json($record);
+    }
+
+    /**
+     * Reject any account_id payload that does not belong to the
+     * authenticated user. Without this, the standard `exists:` rule lets
+     * User A create or move a record onto User B's account (IDOR).
+     */
+    private function assertAccountsOwned(Request $request, array $accountIds): void
+    {
+        $accountIds = array_filter($accountIds, fn ($v) => $v !== null && $v !== '');
+        if (empty($accountIds)) {
+            return;
+        }
+
+        $owned = Account::where('user_id', $request->user()->id)
+            ->whereIn('id', $accountIds)
+            ->pluck('id')
+            ->all();
+
+        $missing = array_diff($accountIds, $owned);
+        if (!empty($missing)) {
+            throw ValidationException::withMessages([
+                'from_account_id' => 'Tài khoản không hợp lệ hoặc không thuộc về bạn.',
+            ]);
+        }
     }
 
     public function create(Request $request)
@@ -98,6 +129,12 @@ class RecordController extends Controller
                 'rate' => 'required'
             ]);
         }
+
+        // IDOR guard — make sure both account ids belong to the caller.
+        $this->assertAccountsOwned($request, [
+            $data['from_account_id'] ?? null,
+            $data['to_account_id'] ?? null,
+        ]);
 
         $data['amount'] = abs($data['amount']);
         if ($data['type'] == "expense" || $data['type'] == "transfer") {
@@ -141,6 +178,12 @@ class RecordController extends Controller
                 'rate' => 'required'
             ]);
         }
+
+        // IDOR guard — block reassigning a record to someone else's account.
+        $this->assertAccountsOwned($request, [
+            $data['from_account_id'] ?? null,
+            $data['to_account_id'] ?? null,
+        ]);
 
         $data['amount'] = abs($data['amount']);
         if ($data['type'] == "expense" || $data['type'] == "transfer") {
