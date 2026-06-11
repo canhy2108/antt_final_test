@@ -9,6 +9,7 @@ import { useAuth } from '@/stores/auth';
 import { usePrefs } from '@/stores/prefs';
 import { userBiometricService } from '@/services/userBiometric';
 import { useAppLock } from '@/hooks/useAppLock';
+import { getMode as getBankImportMode, startListening as startBankListening } from '@/services/bankAutoImport';
 
 export default function RootLayout() {
   const hydrateAuth = useAuth((s) => s.hydrate);
@@ -30,6 +31,16 @@ export default function RootLayout() {
     // active recording. Only enable on native — web has no equivalent.
     if (Platform.OS !== 'web') {
       ScreenCapture.preventScreenCaptureAsync().catch(() => undefined);
+    }
+
+    // Bank notification auto-import — Android only. If the user previously
+    // enabled it (mode != 'off'), wire the listener back on app start.
+    // notificationListener.isAvailable() guards against Expo Go / iOS.
+    if (Platform.OS === 'android') {
+      (async () => {
+        const mode = await getBankImportMode();
+        if (mode !== 'off') startBankListening();
+      })().catch(() => undefined);
     }
     return () => {
       if (Platform.OS !== 'web') {
@@ -68,6 +79,7 @@ export default function RootLayout() {
           <Stack.Screen name="totp-setup" options={{ presentation: 'modal' }} />
           <Stack.Screen name="biometric-lock" />
           <Stack.Screen name="ekyc" options={{ presentation: 'modal' }} />
+          <Stack.Screen name="bank-notifications" />
         </Stack>
       </SafeAreaProvider>
     </GestureHandlerRootView>

@@ -1,5 +1,5 @@
-import { useCallback, useState } from 'react';
-import { View, Text, StyleSheet, ScrollView, Pressable, Switch, Alert } from 'react-native';
+import { useCallback, useEffect, useState } from 'react';
+import { View, Text, StyleSheet, ScrollView, Pressable, Switch, Alert, Platform } from 'react-native';
 import { Ionicons } from '@expo/vector-icons';
 import { router, useFocusEffect } from 'expo-router';
 import { SafeAreaView } from 'react-native-safe-area-context';
@@ -10,6 +10,18 @@ import { biometricService } from '@/services/biometric';
 import { BiometricCapability } from '@/types';
 import { secureStorage } from '@/services/secureStorage';
 import { haptic } from '@/utils/haptics';
+import {
+  notificationListener,
+  PermissionState,
+} from '@/services/notificationListener';
+import {
+  AutoImportMode,
+  getMode as getBankImportMode,
+  loadPending,
+  setMode as setBankImportMode,
+  startListening as startBankListening,
+  stopListening as stopBankListening,
+} from '@/services/bankAutoImport';
 
 export default function SettingsScreen() {
   const user = useAuth((s) => s.user);
@@ -21,6 +33,15 @@ export default function SettingsScreen() {
   const [faceEnrolled, setFaceEnrolled] = useState(false);
   const [fingerEnrolled, setFingerEnrolled] = useState(false);
 
+  // Bank auto-import state. Only meaningful on Android dev build —
+  // notificationListener.isAvailable() returns false elsewhere and we
+  // hide the section entirely.
+  const [bankImportMode, setBankImportModeState] = useState<AutoImportMode>('off');
+  const [notifPermission, setNotifPermission] = useState<PermissionState>('unknown');
+  const [pendingCount, setPendingCount] = useState(0);
+  const bankListenerAvailable = notificationListener.isAvailable();
+  const bankUnavailableReason = notificationListener.unavailableReason();
+
   // Refresh enrollment state whenever the user comes back from /biometric/setup
   useFocusEffect(
     useCallback(() => {
@@ -28,9 +49,62 @@ export default function SettingsScreen() {
         setCap(await biometricService.getCapability());
         setFaceEnrolled(await secureStorage.isFaceEnrolled());
         setFingerEnrolled(await secureStorage.isFingerprintEnrolled());
+
+        // Bank auto-import status — only poll on Android. On iOS and on
+        // Expo Go these are no-ops returning safe defaults.
+        if (bankListenerAvailable) {
+          setBankImportModeState(await getBankImportMode());
+          setNotifPermission(await notificationListener.getPermissionStatus());
+        }
+        const pending = await loadPending();
+        setPendingCount(pending.length);
       })();
-    }, []),
+    }, [bankListenerAvailable]),
   );
+
+  /**
+   * Toggle mode handler — gates on (1) listener available, (2) OS
+   * notification permission granted. If either fails, route the user to
+   * the right Settings screen instead of silently failing.
+   */
+  async function onChangeBankImportMode(next: AutoImportMode) {
+    if (!bankListenerAvailable) {
+      Alert.alert(
+        'Tính năng không khả dụng',
+        bankUnavailableReason ?? 'Vui lòng dùng EAS Dev Build trên Android.',
+      );
+      return;
+    }
+    if (next !== 'off') {
+      const status = await notificationListener.getPermissionStatus();
+      setNotifPermission(status);
+      if (status !== 'authorized') {
+        Alert.alert(
+          'Cần quyền đọc thông báo',
+          'BudgetBee cần quyền "Notification access" của Android để đọc thông báo ngân hàng. ' +
+            'Bấm "Mở Cài đặt" rồi bật toggle "BudgetBee" trong danh sách.',
+          [
+            { text: 'Huỷ', style: 'cancel' },
+            {
+              text: 'Mở Cài đặt',
+              onPress: async () => {
+                await notificationListener.openSettings();
+              },
+            },
+          ],
+        );
+        return;
+      }
+    }
+    haptic.light();
+    await setBankImportMode(next);
+    setBankImportModeState(next);
+    if (next === 'off') {
+      stopBankListening();
+    } else {
+      startBankListening();
+    }
+  }
 
   const bioSubtitle = (() => {
     if (cap === 'unavailable') return 'Thiết bị chưa cài vân tay / khoá màn hình';
@@ -127,6 +201,88 @@ export default function SettingsScreen() {
             router.push('/pin-change');
           }}
         />
+
+        {/* Bank auto-import — chỉ render trên Android dev build. Trên iOS / Expo Go
+            ta cho hiển thị 1 dòng "Không hỗ trợ trên iOS / Expo Go" để minh bạch. */}
+        {Platform.OS === 'android' || bankListenerAvailable ? (
+          <>
+            <Section label="Tự động ghi nhận giao dịch" />
+            {!bankListenerAvailable ? (
+              <View style={[styles.tile, { borderWidth: 1, borderColor: '#F59E0B', backgroundColor: '#FEF3C7' }]}>
+                <View style={[styles.tileIcon, { backgroundColor: 'rgba(245,158,11,0.18)' }]}>
+                  <Ionicons name="warning" size={22} color={Colors.warning} />
+                </View>
+                <View style={{ flex: 1, marginLeft: 12 }}>
+                  <Text style={Typography.headingS}>Cần EAS Dev Build</Text>
+                  <Text style={Typography.bodyS}>
+                    {bankUnavailableReason ??
+                      'Expo Go không hỗ trợ. Chạy EAS Build → cài APK dev.'}
+                  </Text>
+                </View>
+              </View>
+            ) : (
+              <>
+                <Tile
+                  icon="notifications-outline"
+                  iconBg="rgba(59,130,246,0.12)"
+                  iconColor={Colors.info}
+                  title={
+                    bankImportMode === 'off'
+                      ? 'Tự động đọc thông báo'
+                      : bankImportMode === 'auto'
+                      ? 'Tự lưu khi confidence cao'
+                      : 'Hỏi xác nhận trước khi lưu'
+                  }
+                  subtitle={
+                    notifPermission !== 'authorized' && bankImportMode !== 'off'
+                      ? '⚠️ Chưa cấp quyền Notification access'
+                      : bankImportMode === 'off'
+                      ? 'Đang tắt — bấm để bật'
+                      : bankImportMode === 'auto'
+                      ? 'BudgetBee tự tạo record khi nhận thông báo bank'
+                      : 'BudgetBee bóc data → bạn duyệt trước khi lưu'
+                  }
+                  onPress={() => {
+                    haptic.light();
+                    Alert.alert(
+                      'Chế độ tự động ghi nhận',
+                      'Chọn cách BudgetBee xử lý thông báo từ app ngân hàng:',
+                      [
+                        {
+                          text: 'Tắt',
+                          style: bankImportMode === 'off' ? 'default' : undefined,
+                          onPress: () => onChangeBankImportMode('off'),
+                        },
+                        {
+                          text: 'Hỏi trước khi lưu (khuyến nghị)',
+                          onPress: () => onChangeBankImportMode('confirm'),
+                        },
+                        {
+                          text: 'Tự lưu (chỉ confidence cao)',
+                          onPress: () => onChangeBankImportMode('auto'),
+                        },
+                        { text: 'Huỷ', style: 'cancel' },
+                      ],
+                    );
+                  }}
+                />
+                <Tile
+                  icon="receipt-outline"
+                  iconBg="rgba(189,232,62,0.18)"
+                  iconColor={Colors.primaryDark}
+                  title="Giao dịch chờ duyệt"
+                  subtitle={
+                    pendingCount > 0 ? `${pendingCount} giao dịch đang chờ` : 'Không có gì chờ duyệt'
+                  }
+                  onPress={() => {
+                    haptic.light();
+                    router.push('/bank-notifications');
+                  }}
+                />
+              </>
+            )}
+          </>
+        ) : null}
 
         <Section label="Quản lý tài chính" />
         <Tile

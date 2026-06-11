@@ -27,7 +27,11 @@
       "permissions": [
         "USE_BIOMETRIC",
         "USE_FINGERPRINT",
-        "CAMERA"
+        "CAMERA",
+        "android.permission.POST_NOTIFICATIONS",
+        "android.permission.BIND_NOTIFICATION_LISTENER_SERVICE",
+        "android.permission.RECEIVE_BOOT_COMPLETED",
+        "android.permission.WAKE_LOCK"
       ]
     },
     "web": {
@@ -49,7 +53,8 @@
         {
           "faceIDPermission": "BudgetBee dùng Face ID để mở khoá ứng dụng."
         }
-      ]
+      ],
+      "expo-screen-capture"
     ],
     "experiments": {
       "typedRoutes": true

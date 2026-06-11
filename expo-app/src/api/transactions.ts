@@ -96,7 +96,11 @@ export const transactionsApi = {
 
   /**
    * Create a transaction (a "Record" on backend).
-   * Required: type, amount, date, category_id, from_account_id.
+   *
+   * `category_id` is optional from the FE because the backend
+   * `RecordController::create` defaults missing values to category 1
+   * ("Other"). The auto-import flow relies on this when the parser
+   * can't confidently pick a category from the notification text.
    */
   async create(payload: {
     type: TransactionType;
@@ -104,7 +108,7 @@ export const transactionsApi = {
     date: string;
     name?: string;
     note?: string;
-    category_id: number;
+    category_id?: number;
     from_account_id: number;
     to_account_id?: number;
   }): Promise<Transaction> {
