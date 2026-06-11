@@ -10,43 +10,40 @@ import { useAuth } from '@/stores/auth';
 import { haptic } from '@/utils/haptics';
 
 /**
- * Fingerprint login screen.
+ * Fingerprint login — single-prompt UX.
  *
- * SECURITY: The real fingerprint check is the OS Touch ID / Android Fingerprint
- * prompt fired inside `biometricApi.loginByFingerprint`. The press-and-hold UI
- * is just visual feedback so the screen looks like a banking app; the actual
- * match happens in the Secure Enclave / TEE, and the device-bound credential
- * is released only after the OS confirms the real account owner.
+ * Same reasoning as face-login: previously we had a "press and hold for
+ * 1.5s" fake animation BEFORE calling the real OS BiometricPrompt. Users
+ * felt they had already given their fingerprint, then the OS prompt asked
+ * them to do it again. Two scans for one login.
  *
- * The old "match by closest hold-time within ±1500ms tolerance" logic let
- * anyone hold for ~3s and log in as whichever user enrolled closest to that
- * duration — that has been removed.
+ * Now we just fire the OS prompt on mount and let the OS own the entire
+ * scan UX, exactly like Apple Wallet / Techcombank do.
+ *
+ * `startedRef` guards against React strict-mode / fast-refresh double effects
+ * which would otherwise stack two OS prompts in quick succession.
  */
-type Phase = 'idle' | 'holding' | 'uploading' | 'success' | 'too-short' | 'failed';
-
-const HOLD_TARGET_MS = 1500;
+type Phase = 'authenticating' | 'success' | 'failed';
 
 export default function FingerLoginScreen() {
   const setUser = useAuth((s) => s.setUser);
 
-  const [phase, setPhase] = useState<Phase>('idle');
+  const [phase, setPhase] = useState<Phase>('authenticating');
   const [matchedEmail, setMatchedEmail] = useState<string | null>(null);
   const [errorText, setErrorText] = useState<string | null>(null);
-
-  const holdStartRef = useRef<number | null>(null);
-  const [holdMs, setHoldMs] = useState(0);
-  const progressTimerRef = useRef<ReturnType<typeof setInterval> | null>(null);
+  const startedRef = useRef(false);
 
   const pulse = useRef(new Animated.Value(0)).current;
 
   useEffect(() => {
-    return () => {
-      if (progressTimerRef.current) clearInterval(progressTimerRef.current);
-    };
+    if (startedRef.current) return;
+    startedRef.current = true;
+    runOsBiometricLogin();
+    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
 
   useEffect(() => {
-    if (phase !== 'holding' && phase !== 'uploading') {
+    if (phase !== 'authenticating') {
       pulse.stopAnimation();
       pulse.setValue(0);
       return;
@@ -61,58 +58,19 @@ export default function FingerLoginScreen() {
     return () => loop.stop();
   }, [pulse, phase]);
 
-  function onPressIn() {
-    if (phase !== 'idle' && phase !== 'too-short' && phase !== 'failed') return;
+  async function runOsBiometricLogin() {
     setErrorText(null);
-    haptic.medium();
-    holdStartRef.current = Date.now();
-    setHoldMs(0);
-    setPhase('holding');
-    if (progressTimerRef.current) clearInterval(progressTimerRef.current);
-    progressTimerRef.current = setInterval(() => {
-      if (holdStartRef.current === null) return;
-      const elapsed = Date.now() - holdStartRef.current;
-      setHoldMs(elapsed);
-      if (elapsed >= HOLD_TARGET_MS) {
-        finishHold(elapsed);
-      }
-    }, 50);
-  }
-
-  function onPressOut() {
-    if (phase !== 'holding') return;
-    if (holdStartRef.current === null) return;
-    const elapsed = Date.now() - holdStartRef.current;
-    finishHold(elapsed);
-  }
-
-  async function finishHold(elapsed: number) {
-    if (progressTimerRef.current) {
-      clearInterval(progressTimerRef.current);
-      progressTimerRef.current = null;
-    }
-    holdStartRef.current = null;
-
-    if (elapsed < HOLD_TARGET_MS) {
-      haptic.warning();
-      setPhase('too-short');
-      setHoldMs(0);
-      return;
-    }
-
-    setPhase('uploading');
-
+    setPhase('authenticating');
     try {
-      // Real biometric verification happens INSIDE this call:
-      //   - OS Touch ID / Android Fingerprint prompt fires
-      //   - Stored device-bound bio_token released only on OS pass
-      //   - Server verifies hash, returns user + Sanctum token
+      // Real biometric verification: OS Touch ID / Android Fingerprint
+      // prompt fires inside this call. The device-bound bio_token is
+      // released only after the OS confirms the real account owner.
       const { user } = await biometricApi.loginByFingerprint();
       setUser(user);
       setMatchedEmail(user.email);
       haptic.success();
       setPhase('success');
-      setTimeout(() => router.replace('/(tabs)'), 800);
+      setTimeout(() => router.replace('/(tabs)'), 600);
     } catch (e: any) {
       haptic.error();
       setErrorText(e?.message ?? 'Xác thực vân tay thất bại');
@@ -121,29 +79,22 @@ export default function FingerLoginScreen() {
   }
 
   function retry() {
-    setErrorText(null);
-    setMatchedEmail(null);
-    setHoldMs(0);
-    setPhase('idle');
+    runOsBiometricLogin();
   }
 
-  const progress = Math.min(1, holdMs / HOLD_TARGET_MS);
-  const ringStyle = {
-    transform: [{ scale: pulse.interpolate({ inputRange: [0, 1], outputRange: [1, 2.2] }) }],
-    opacity: pulse.interpolate({ inputRange: [0, 1], outputRange: [0.55, 0] }),
-  };
-
+  const isAuthenticating = phase === 'authenticating';
   const isSuccess = phase === 'success';
-  const isHolding = phase === 'holding';
-  const isUploading = phase === 'uploading';
   const isFailed = phase === 'failed';
+
+  const ringScale = pulse.interpolate({ inputRange: [0, 1], outputRange: [1, 2.2] });
+  const ringOpacity = pulse.interpolate({ inputRange: [0, 1], outputRange: [0.55, 0] });
 
   return (
     <SafeAreaView style={styles.bg} edges={['top']}>
       <StatusBar barStyle="light-content" />
       <View style={styles.topBar}>
-        <Pressable onPress={() => router.back()} hitSlop={12}>
-          <Ionicons name="close" size={28} color={Colors.white} />
+        <Pressable onPress={() => router.back()} hitSlop={12} disabled={isAuthenticating}>
+          <Ionicons name="close" size={28} color={isAuthenticating ? 'rgba(255,255,255,0.3)' : Colors.white} />
         </Pressable>
         <Text style={[Typography.headingM, { color: Colors.white }]}>Đăng nhập vân tay</Text>
         <View style={{ width: 28 }} />
@@ -155,46 +106,40 @@ export default function FingerLoginScreen() {
             ? matchedEmail
               ? `Đăng nhập với ${matchedEmail}`
               : 'Đăng nhập thành công'
-            : isUploading
-            ? 'Đang xác thực với OS...'
-            : isHolding
-            ? `Giữ tiếp... ${Math.max(0, Math.ceil((HOLD_TARGET_MS - holdMs) / 1000))}s`
-            : phase === 'too-short'
-            ? 'Cần giữ lâu hơn — thử lại'
             : isFailed
             ? 'Xác thực vân tay thất bại'
-            : 'Nhấn và giữ vùng vân tay'}
+            : 'Đang xác thực bằng vân tay'}
         </Text>
 
-        <Pressable
-          onPressIn={onPressIn}
-          onPressOut={onPressOut}
-          disabled={isSuccess || isUploading || isHolding}
-          style={styles.fingerHub}
-        >
-          {isHolding || isUploading ? <Animated.View style={[styles.pulseRing, ringStyle]} /> : null}
-
-          <View style={styles.progressRing}>
-            <View style={[styles.progressFill, { height: `${progress * 100}%` }]} />
-          </View>
+        <View style={styles.fingerHub}>
+          {isAuthenticating ? (
+            <Animated.View
+              style={[styles.pulseRing, { transform: [{ scale: ringScale }], opacity: ringOpacity }]}
+            />
+          ) : null}
 
           <View
             style={[
               styles.fingerCircle,
               isSuccess && { backgroundColor: 'rgba(34,197,94,0.18)', borderColor: Colors.income },
               isFailed && { borderColor: Colors.expense, backgroundColor: 'rgba(239,68,68,0.10)' },
-              phase === 'too-short' && { borderColor: Colors.expense },
             ]}
           >
             <Ionicons
               name={isSuccess ? 'checkmark' : isFailed ? 'close' : 'finger-print'}
               size={88}
-              color={isSuccess ? Colors.income : isFailed || phase === 'too-short' ? Colors.expense : Colors.primary}
+              color={isSuccess ? Colors.income : isFailed ? Colors.expense : Colors.primary}
             />
           </View>
-        </Pressable>
+        </View>
 
-        {errorText ? (
+        {!isFailed ? (
+          <Text style={[Typography.bodyS, { color: 'rgba(255,255,255,0.55)', textAlign: 'center', marginTop: 18, paddingHorizontal: 24 }]}>
+            Đặt ngón tay lên cảm biến vân tay của thiết bị
+          </Text>
+        ) : null}
+
+        {errorText && isFailed ? (
           <Text style={[Typography.bodyS, { color: Colors.expense, textAlign: 'center', marginTop: 16, paddingHorizontal: 24 }]}>
             {errorText}
           </Text>
@@ -241,36 +186,15 @@ const styles = StyleSheet.create({
     borderRadius: HUB / 2,
     backgroundColor: Colors.primary,
   },
-  progressRing: {
-    position: 'absolute',
-    width: HUB,
-    height: HUB,
-    borderRadius: HUB / 2,
-    overflow: 'hidden',
-    backgroundColor: 'rgba(189,232,62,0.06)',
-  },
-  progressFill: {
-    position: 'absolute',
-    left: 0,
-    right: 0,
-    bottom: 0,
-    backgroundColor: 'rgba(189,232,62,0.35)',
-  },
   fingerCircle: {
-    width: HUB,
-    height: HUB,
-    borderRadius: HUB / 2,
+    width: 140,
+    height: 140,
+    borderRadius: 70,
     backgroundColor: 'rgba(189,232,62,0.10)',
-    borderWidth: 3,
+    borderWidth: 2,
     borderColor: Colors.primary,
     alignItems: 'center',
     justifyContent: 'center',
-  },
-  footer: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    justifyContent: 'center',
-    paddingVertical: Space.s24,
   },
   secondaryBtn: {
     paddingHorizontal: 16,
@@ -280,5 +204,11 @@ const styles = StyleSheet.create({
     borderColor: 'rgba(255,255,255,0.30)',
     alignItems: 'center',
     justifyContent: 'center',
+  },
+  footer: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'center',
+    paddingVertical: Space.s24,
   },
 });

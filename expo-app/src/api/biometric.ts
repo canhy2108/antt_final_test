@@ -97,12 +97,17 @@ async function ensureOsBiometricPass(reason: string): Promise<void> {
 }
 
 async function enroll(kind: 'face' | 'fingerprint', label?: string): Promise<{ credentialId: number }> {
-  // Pass the OS biometric prompt BEFORE asking the server for a token.
-  // Guarantees the real account owner (who is already password-logged-in)
-  // is physically present at enrolment.
-  const reason = kind === 'face' ? 'Xác thực khuôn mặt để đăng ký' : 'Xác thực vân tay để đăng ký';
-  await ensureOsBiometricPass(reason);
-
+  // Single OS biometric prompt for the whole enrolment.
+  //
+  // Previous version called `ensureOsBiometricPass()` here AND then wrote to
+  // SecureStore with `requireAuthentication: true` — which on Android creates
+  // a Keystore key bound to the biometric session and triggers a second
+  // prompt the moment the key is generated. Two prompts = "scan twice" UX.
+  //
+  // Now: the password screen already confirmed account ownership, and the
+  // single biometric prompt fires inside `saveBioCredential` (Android) /
+  // on the first read on iOS. Caller is responsible for having verified
+  // the user with their password before invoking this.
   const fp = await deviceFingerprint.get();
   const email = (await secureStorage.getUserEmail()) ?? '';
 
@@ -112,8 +117,10 @@ async function enroll(kind: 'face' | 'fingerprint', label?: string): Promise<{ c
       label: label ?? null,
     });
 
-    // Store credential in OS Keystore with biometric-required access. Every
-    // future read triggers Face ID / Touch ID before returning the token.
+    // Store credential in OS Keystore with biometric-required access. On
+    // Android this is where the OS biometric prompt fires (key bind);
+    // on iOS the prompt fires lazily on the first read. Every future read
+    // triggers Face ID / Touch ID before returning the token.
     await secureKeystore.saveBioCredential(kind, {
       credentialId: String(res.data.credential_id),
       bioToken: res.data.bio_token,

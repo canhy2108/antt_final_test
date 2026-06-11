@@ -12,7 +12,6 @@ import {
   Platform,
 } from 'react-native';
 import { Ionicons } from '@expo/vector-icons';
-import { CameraView, useCameraPermissions } from 'expo-camera';
 import { router } from 'expo-router';
 import { SafeAreaView } from 'react-native-safe-area-context';
 import { Colors, Typography, Space, Radius } from '@/theme';
@@ -22,37 +21,28 @@ import { BiometricCapability } from '@/types';
 import { haptic } from '@/utils/haptics';
 import { verifyPin as checkPinHash, needsRehash, hashPin } from '@/utils/pinCrypto';
 
+/**
+ * App-lock screen. Single OS biometric prompt on mount, PIN fallback if
+ * the user cancels or biometric is unavailable. No fake camera UI in
+ * front of the real OS prompt — that's what made it feel like the app
+ * was asking the user to scan twice.
+ */
 type Phase = 'biometric-scan' | 'pin-entry' | 'verified';
-const FRAME_SIZE = 220;
-const SCAN_HEIGHT = 220;
 
 export default function BiometricLockScreen() {
-  const [permission, requestPermission] = useCameraPermissions();
   const [cap, setCap] = useState<BiometricCapability | null>(null);
   const [phase, setPhase] = useState<Phase>('biometric-scan');
   const [busy, setBusy] = useState(false);
   const [pinInput, setPinInput] = useState('');
   const [pinError, setPinError] = useState<string | null>(null);
   const pinInputRef = useRef<TextInput>(null);
+  const promptFiredRef = useRef(false);
 
-  const scan = useRef(new Animated.Value(0)).current;
   const pulse = useRef(new Animated.Value(0)).current;
 
   useEffect(() => {
     biometricService.getCapability().then(setCap);
   }, []);
-
-  useEffect(() => {
-    if (phase !== 'biometric-scan') return;
-    const loop = Animated.loop(
-      Animated.sequence([
-        Animated.timing(scan, { toValue: 1, duration: 1200, easing: Easing.inOut(Easing.ease), useNativeDriver: true }),
-        Animated.timing(scan, { toValue: 0, duration: 1200, easing: Easing.inOut(Easing.ease), useNativeDriver: true }),
-      ]),
-    );
-    loop.start();
-    return () => loop.stop();
-  }, [scan, phase]);
 
   useEffect(() => {
     if (phase !== 'biometric-scan') return;
@@ -68,10 +58,17 @@ export default function BiometricLockScreen() {
 
   useEffect(() => {
     if (cap === null) return;
-    if (cap === 'unavailable') return;
     if (phase !== 'biometric-scan') return;
-    const t = setTimeout(() => authenticate(), 1000);
-    return () => clearTimeout(t);
+    // No biometric hardware on this device — go straight to PIN entry.
+    if (cap === 'unavailable') {
+      setPhase('pin-entry');
+      return;
+    }
+    // Fire OS prompt exactly once per mount. Strict-mode / fast-refresh
+    // can re-run this effect; the ref guard prevents stacked prompts.
+    if (promptFiredRef.current) return;
+    promptFiredRef.current = true;
+    authenticate();
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [cap, phase]);
 
@@ -140,12 +137,8 @@ export default function BiometricLockScreen() {
     }
   }
 
-  const scanY = scan.interpolate({ inputRange: [0, 1], outputRange: [0, SCAN_HEIGHT] });
   const pulseScale = pulse.interpolate({ inputRange: [0, 1], outputRange: [1, 1.6] });
   const pulseOpacity = pulse.interpolate({ inputRange: [0, 1], outputRange: [0.6, 0] });
-
-  const showCamera = permission?.granted ?? false;
-  const askedPermission = permission !== null;
 
   if (phase === 'pin-entry') {
     return <PinEntryPhase pinInput={pinInput} setPinInput={setPinInput} busy={busy} pinError={pinError} onVerify={verifyPin} inputRef={pinInputRef} />;
@@ -191,51 +184,36 @@ export default function BiometricLockScreen() {
           }}
           hitSlop={12}
         >
-          {/* phase has already been narrowed to 'biometric-scan' by the early-return above. */}
           <Ionicons name="lock-closed" size={20} color={Colors.white} />
         </Pressable>
-        <Text style={[Typography.labelL, { color: Colors.white }]}>Đặt mặt vào khung</Text>
+        <Text style={[Typography.labelL, { color: Colors.white }]}>BudgetBee đang khoá</Text>
         <View style={{ width: 24 }} />
       </View>
 
       <View style={styles.body}>
-        {(
-          <>
-            <View style={styles.faceFrameWrap}>
-              <View style={styles.faceFrame}>
-                {showCamera ? (
-                  <CameraView style={StyleSheet.absoluteFill} facing="front" />
-                ) : (
-                  <View style={[StyleSheet.absoluteFill, styles.cameraFallback]}>
-                    <Ionicons name="person" size={120} color="rgba(255,255,255,0.15)" />
-                  </View>
-                )}
+        <Pressable onPress={authenticate} style={styles.fingerWrap}>
+          <Animated.View style={[styles.pulseRing, { transform: [{ scale: pulseScale }], opacity: pulseOpacity }]} />
+          <View style={[styles.fingerCircle, { backgroundColor: 'rgba(189,232,62,0.10)', borderColor: Colors.primary }]}>
+            <Ionicons name="finger-print" size={64} color={Colors.primary} />
+          </View>
+          <Text style={[Typography.headingM, { color: Colors.white, marginTop: 24, textAlign: 'center' }]}>
+            {busy ? 'Đang xác thực…' : 'Xác thực để mở khoá'}
+          </Text>
+          <Text style={[Typography.bodyS, { color: 'rgba(255,255,255,0.55)', marginTop: 8, textAlign: 'center', paddingHorizontal: 24 }]}>
+            Dùng vân tay hoặc khuôn mặt của thiết bị. Nếu cần, chạm vào biểu tượng để thử lại.
+          </Text>
+        </Pressable>
 
-                <Animated.View style={[styles.scanLine, { transform: [{ translateY: scanY }] }]} />
-
-                <View style={[styles.corner, { top: 0, left: 0, borderTopWidth: 3, borderLeftWidth: 3 }]} />
-                <View style={[styles.corner, { top: 0, right: 0, borderTopWidth: 3, borderRightWidth: 3 }]} />
-                <View style={[styles.corner, { bottom: 0, left: 0, borderBottomWidth: 3, borderLeftWidth: 3 }]} />
-                <View style={[styles.corner, { bottom: 0, right: 0, borderBottomWidth: 3, borderRightWidth: 3 }]} />
-              </View>
-
-              {!showCamera && askedPermission ? (
-                <Pressable onPress={requestPermission} style={styles.permBtn}>
-                  <Ionicons name="camera-outline" size={14} color={Colors.dark} />
-                  <Text style={[Typography.caption, { marginLeft: 4, color: Colors.dark, fontWeight: '700' }]}>Bật camera để hiệu ứng đẹp hơn</Text>
-                </Pressable>
-              ) : null}
-            </View>
-
-            <Pressable onPress={authenticate} style={styles.fingerWrap}>
-              <Animated.View style={[styles.pulseRing, { transform: [{ scale: pulseScale }], opacity: pulseOpacity }]} />
-              <View style={[styles.fingerCircle, { backgroundColor: 'rgba(189,232,62,0.10)', borderColor: Colors.primary }]}>
-                <Ionicons name="finger-print" size={36} color={Colors.primary} />
-              </View>
-              <Text style={[Typography.labelM, { color: 'rgba(255,255,255,0.7)', marginTop: 12 }]}>{busy ? 'Đang xác thực…' : 'Chạm để thử lại'}</Text>
-            </Pressable>
-          </>
-        )}
+        <Pressable
+          onPress={() => {
+            haptic.light();
+            setPhase('pin-entry');
+          }}
+          style={styles.pinFallbackBtn}
+        >
+          <Ionicons name="keypad-outline" size={16} color="rgba(255,255,255,0.8)" />
+          <Text style={[Typography.buttonM, { color: 'rgba(255,255,255,0.8)', marginLeft: 6 }]}>Dùng mã PIN</Text>
+        </Pressable>
       </View>
 
       <View style={styles.footer}>
@@ -246,6 +224,7 @@ export default function BiometricLockScreen() {
   );
 }
 
+const FINGER_HUB = 140;
 const styles = StyleSheet.create({
   safe: { flex: 1, backgroundColor: '#0B0B0F' },
   topBar: {
@@ -255,62 +234,36 @@ const styles = StyleSheet.create({
     paddingHorizontal: 16,
     paddingVertical: 8,
   },
-  body: { flex: 1, alignItems: 'center', paddingHorizontal: 24, paddingTop: 12 },
-  faceFrameWrap: { alignItems: 'center', marginTop: 32 },
-  faceFrame: {
-    width: FRAME_SIZE,
-    height: FRAME_SIZE,
-    borderRadius: FRAME_SIZE / 2,
-    overflow: 'hidden',
-    backgroundColor: '#1a1a22',
-    position: 'relative',
-  },
-  cameraFallback: { alignItems: 'center', justifyContent: 'center' },
-  scanLine: {
-    position: 'absolute',
-    left: 0,
-    right: 0,
-    height: 3,
-    backgroundColor: Colors.primary,
-    shadowColor: Colors.primary,
-    shadowOffset: { width: 0, height: 0 },
-    shadowOpacity: 0.95,
-    shadowRadius: 12,
-    elevation: 18,
-  },
-  corner: {
-    position: 'absolute',
-    width: 26,
-    height: 26,
-    borderColor: Colors.primary,
-  },
-  permBtn: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    marginTop: 14,
-    backgroundColor: Colors.primary,
-    paddingHorizontal: 12,
-    paddingVertical: 6,
-    borderRadius: Radius.full,
-  },
-  fingerWrap: { alignItems: 'center', marginTop: 28, position: 'relative' },
+  body: { flex: 1, alignItems: 'center', justifyContent: 'space-between', paddingHorizontal: 24, paddingTop: 12, paddingBottom: 8 },
+  fingerWrap: { alignItems: 'center', marginTop: 48, position: 'relative' },
   pulseRing: {
     position: 'absolute',
     top: 0,
-    width: 88,
-    height: 88,
-    borderRadius: 44,
+    width: FINGER_HUB,
+    height: FINGER_HUB,
+    borderRadius: FINGER_HUB / 2,
     backgroundColor: Colors.primary,
   },
   fingerCircle: {
-    width: 88,
-    height: 88,
-    borderRadius: 44,
+    width: FINGER_HUB,
+    height: FINGER_HUB,
+    borderRadius: FINGER_HUB / 2,
     backgroundColor: 'rgba(189,232,62,0.10)',
     borderWidth: 2,
     borderColor: Colors.primary,
     alignItems: 'center',
     justifyContent: 'center',
+  },
+  pinFallbackBtn: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'center',
+    paddingHorizontal: 18,
+    paddingVertical: 12,
+    borderRadius: Radius.full,
+    borderWidth: 1,
+    borderColor: 'rgba(255,255,255,0.20)',
+    marginBottom: 8,
   },
   footer: {
     flexDirection: 'row',
