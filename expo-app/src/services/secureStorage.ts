@@ -89,7 +89,7 @@ export const secureStorage = {
    * On RN/Expo we don't currently set `requireAuthentication` (it forces
    * an extra OS prompt and was not used previously); the OS biometric
    * prompt is done explicitly via `expo-local-authentication` before
-   * each retrieval, see biometricApi.loginByFace.
+   * each retrieval, see biometricApi.loginByBiometric.
    */
   async saveBioCredential(kind: 'face' | 'fingerprint', payload: BioCredential): Promise<void> {
     await setItem(bioKey(kind), JSON.stringify(payload));

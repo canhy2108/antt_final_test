@@ -142,20 +142,27 @@ export const secureKeystore = {
         ? SecureStore.canUseBiometricAuthentication()
         : true;
 
-    if (canBio) {
-      await SecureStore.setItemAsync(
-        STORAGE_KEY[kind],
-        JSON.stringify(payload),
-        storeOptions(kind),
+    if (!canBio) {
+      // G2 (HIGH) — REFUSE to store the bio_token without the OS biometric
+      // gate. The previous fallback wrote it as a plain SecureStore entry and
+      // justified it with a comment claiming "the caller re-checks via
+      // biometricService.authenticate()" — that is FALSE: the login path
+      // (src/api/biometric.ts → login) relies ENTIRELY on the
+      // requireAuthentication gate firing on read and never calls
+      // authenticate() itself. An ungated entry would let any process that can
+      // read SecureStore replay the bio_token with no biometric check. There
+      // is no safe way to offer biometric quick-login on hardware that cannot
+      // gate the key, so we refuse enrolment and keep the user on password.
+      throw new Error(
+        'Thiết bị này không hỗ trợ lưu khoá sinh trắc có bảo vệ. Vui lòng đăng nhập bằng email và mật khẩu.',
       );
-    } else {
-      // Hardware doesn't support biometric-gated storage. Fall back to a
-      // standard encrypted entry — still better than AsyncStorage, but the
-      // bio_token won't have the biometric gate. Caller already enforces
-      // the gate via biometricService.authenticate() before unlocking, so
-      // this is the secondary defence layer only.
-      await SecureStore.setItemAsync(STORAGE_KEY[kind], JSON.stringify(payload));
     }
+
+    await SecureStore.setItemAsync(
+      STORAGE_KEY[kind],
+      JSON.stringify(payload),
+      storeOptions(kind),
+    );
     await AsyncStorage.setItem(SNAPSHOT_KEY[kind], snapshot);
   },
 

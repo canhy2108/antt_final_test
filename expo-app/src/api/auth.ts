@@ -143,6 +143,89 @@ export const authApi = {
   },
 
   /**
+   * BƯỚC 1 — Quên mật khẩu. Gửi OTP đặt lại tới email (nếu tồn tại).
+   * Backend LUÔN trả message chung để không lộ email có đăng ký hay không
+   * (chống account enumeration). Mã đặt lại CHỈ đi qua email — endpoint này
+   * KHÔNG BAO GIỜ trả mã trong response (F1), kể cả ở môi trường dev.
+   */
+  async forgotPassword(
+    email: string,
+  ): Promise<{ message: string; expires_in_minutes?: number }> {
+    try {
+      const res = await apiClient.post('/forgot-password', {
+        email: email.trim().toLowerCase(),
+      });
+      return res.data;
+    } catch (err) {
+      throw new Error(laravelErrorMessage(err, 'Không gửi được mã đặt lại'));
+    }
+  },
+
+  /**
+   * BƯỚC 2 — Đặt lại mật khẩu bằng OTP. Thành công ⇒ backend đã HUỶ mọi
+   * phiên cũ (Sanctum token + refresh token). Người dùng phải đăng nhập
+   * lại bằng mật khẩu mới — KHÔNG tự cấp token ở bước này.
+   */
+  async resetPassword(payload: {
+    email: string;
+    code: string;
+    password: string;
+  }): Promise<{ message: string }> {
+    try {
+      const res = await apiClient.post('/reset-password', {
+        email: payload.email.trim().toLowerCase(),
+        code: payload.code.trim(),
+        password: payload.password,
+        confirm_password: payload.password,
+      });
+      return res.data;
+    } catch (err) {
+      throw new Error(laravelErrorMessage(err, 'Không đặt lại được mật khẩu'));
+    }
+  },
+
+  /**
+   * TẦNG 2 — BƯỚC 1: Quên mật khẩu qua MAGIC LINK. Backend gửi email chứa liên
+   * kết mở thẳng app (budgetbee://reset-link?token=...) — người dùng KHÔNG phải
+   * gõ mã 6 số tay. Vẫn LUÔN trả message chung (chống account enumeration);
+   * token CHỈ đi qua email, KHÔNG bao giờ nằm trong response.
+   */
+  async requestResetLink(
+    email: string,
+  ): Promise<{ message: string; expires_in_minutes?: number }> {
+    try {
+      const res = await apiClient.post('/request-reset-link', {
+        email: email.trim().toLowerCase(),
+      });
+      return res.data;
+    } catch (err) {
+      throw new Error(laravelErrorMessage(err, 'Không gửi được liên kết đặt lại'));
+    }
+  },
+
+  /**
+   * TẦNG 2 — BƯỚC 2: Đặt lại mật khẩu bằng TOKEN từ magic link. Token tới từ
+   * deep link (?token=...); CHỈ giữ trong bộ nhớ rồi gửi thẳng lên server —
+   * KHÔNG log, KHÔNG lưu vào secure storage. Thành công ⇒ backend đã HUỶ mọi
+   * phiên cũ; người dùng phải đăng nhập lại (KHÔNG tự cấp token ở bước này).
+   */
+  async resetPasswordViaLink(payload: {
+    token: string;
+    password: string;
+  }): Promise<{ message: string }> {
+    try {
+      const res = await apiClient.post('/reset-password-link', {
+        token: payload.token,
+        password: payload.password,
+        confirm_password: payload.password,
+      });
+      return res.data;
+    } catch (err) {
+      throw new Error(laravelErrorMessage(err, 'Không đặt lại được mật khẩu'));
+    }
+  },
+
+  /**
    * Auth-required: request an OTP for a sensitive action. Caller should then
    * include the code in the body of the sensitive endpoint.
    */

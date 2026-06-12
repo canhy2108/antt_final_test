@@ -27,47 +27,43 @@ import { haptic } from '@/utils/haptics';
 import { openOsBiometricSettings, osBiometricSettingsHint } from '@/utils/biometricSettings';
 
 /**
- * Biometric setup screen — iOS-Settings-style toggle switches.
+ * Biometric setup — ONE unified toggle (Task 2).
  *
- * Behaviour per spec:
- *   1. The user sees two switches: "Đăng nhập khuôn mặt" + "Đăng nhập vân tay".
- *   2. Turning a switch ON:
- *        - If the OS has no biometric enrolled → Alert with "Mở Cài đặt"
- *          CTA, switch stays OFF.
- *        - Else → inline password modal (re-auth the owner) → on confirm,
- *          call enrollFace/enrollFingerprint. The OS biometric prompt
- *          fires ONCE during Keystore save (see src/api/biometric.ts).
- *          Success → switch flips ON. Failure → switch stays OFF + Alert.
- *   3. Turning a switch OFF:
- *        - Confirm dialog → clears the device credential for that kind.
+ * The old screen had two switches (Khuôn mặt + Vân tay). That split made no
+ * sense: the OS already decides which modality a device uses, and binding two
+ * separate credentials just doubled the surface for the "double scan" bug.
  *
- * No more "scan-and-confirm" full-screen flow for enrolment — the user
- * never has to dig through a camera animation just to flip a setting,
- * which matches how every banking app actually does it.
+ * Now there is a single switch "Đăng nhập bằng sinh trắc học":
+ *   1. Turning it ON:
+ *        - OS has no biometric enrolled → Alert + "Mở Cài đặt" CTA, stays OFF.
+ *        - Else → password modal (re-auth the owner) → enrollBiometric().
+ *          The OS biometric prompt fires EXACTLY ONCE during the Keystore
+ *          save (see src/api/biometric.ts). Success → switch flips ON.
+ *   2. Turning it OFF:
+ *        - Confirm → wipe the device credential.
+ *
+ * `biometricService.primaryKind()` decides only the icon/label (face vs
+ * finger); the underlying flow is identical either way.
  */
-type Kind = 'face' | 'fingerprint';
-
 export default function BiometricSetupScreen() {
-  const [faceEnrolled, setFaceEnrolled] = useState(false);
-  const [fingerEnrolled, setFingerEnrolled] = useState(false);
+  const [bioEnrolled, setBioEnrolled] = useState(false);
   const [cap, setCap] = useState<BiometricCapability>('unavailable');
+  const [kind, setKind] = useState<'face' | 'fingerprint'>('fingerprint');
   const setBio = usePrefs((s) => s.setBiometric);
 
-  // Inline password modal state — used by both switches.
-  const [pwModalKind, setPwModalKind] = useState<Kind | null>(null);
+  // Inline password modal state.
+  const [pwModalOpen, setPwModalOpen] = useState(false);
   const [pwInput, setPwInput] = useState('');
   const [pwBusy, setPwBusy] = useState(false);
   const [pwError, setPwError] = useState<string | null>(null);
 
-  // Optimistic toggle state — the Switch is controlled, but the underlying
-  // enrolment is async. We track which kind is mid-flight so the user can't
-  // double-tap and start two enrolments.
-  const [busyKind, setBusyKind] = useState<Kind | null>(null);
+  // Single in-flight guard so the user can't double-tap into two enrolments.
+  const [busy, setBusy] = useState(false);
 
   const refresh = useCallback(async () => {
-    setFaceEnrolled((await secureStorage.isFaceEnrolled?.()) ?? false);
-    setFingerEnrolled((await secureStorage.isFingerprintEnrolled?.()) ?? false);
+    setBioEnrolled(await biometricApi.hasAnyEnrolled());
     setCap(await biometricService.getCapability());
+    setKind(await biometricService.primaryKind());
   }, []);
 
   useEffect(() => {
@@ -80,18 +76,19 @@ export default function BiometricSetupScreen() {
     }, [refresh]),
   );
 
-  const isFaceOn = faceEnrolled;
-  const isFingerOn = fingerEnrolled;
-  const osUnavailable = cap === 'unavailable';
+  // Chỉ coi là "sẵn sàng" khi có sinh trắc THẬT (Face ID / vân tay) — không
+  // chấp nhận thiết bị chỉ có mã PIN/passcode ('deviceCredential'). Bind
+  // bio_token sau một keystore gated bằng PIN sẽ phá vỡ ý nghĩa "sinh trắc
+  // học" và rơi vào nhánh lưu không-bảo-vệ (đã bị chặn ở secureKeystore).
+  const osUnavailable = cap !== 'biometric';
+  const kindLabel = kind === 'face' ? 'khuôn mặt' : 'vân tay';
+  const kindIcon: keyof typeof Ionicons.glyphMap = kind === 'face' ? 'happy-outline' : 'finger-print';
 
-  /**
-   * Pressed the OS-not-enrolled gate or a disabled switch. Show the
-   * Settings deep-link option.
-   */
-  function promptOpenSettings(kind: Kind) {
+  /** OS has nothing enrolled — offer the Settings deep-link. */
+  function promptOpenSettings() {
     Alert.alert(
-      kind === 'face' ? 'Thiết bị chưa bật khuôn mặt' : 'Thiết bị chưa đăng ký vân tay',
-      'Hệ điều hành chưa đăng ký sinh trắc nào. Bật trong Cài đặt thiết bị trước, sau đó quay lại đây để bật trong BudgetBee.\n\n' +
+      'Thiết bị chưa bật sinh trắc học',
+      'Hệ điều hành chưa đăng ký khuôn mặt / vân tay nào. Bật trong Cài đặt thiết bị trước, sau đó quay lại đây để bật trong BudgetBee.\n\n' +
         osBiometricSettingsHint(),
       [
         { text: 'Để sau', style: 'cancel' },
@@ -99,70 +96,55 @@ export default function BiometricSetupScreen() {
           text: 'Mở Cài đặt',
           onPress: async () => {
             const ok = await openOsBiometricSettings();
-            if (!ok) {
-              Alert.alert('Không mở được Cài đặt', 'Vui lòng mở Cài đặt thủ công.');
-            }
+            if (!ok) Alert.alert('Không mở được Cài đặt', 'Vui lòng mở Cài đặt thủ công.');
           },
         },
       ],
     );
   }
 
-  /**
-   * User flipped a switch. Decide enrol vs unenrol based on current state.
-   */
-  async function onToggle(kind: Kind, nextOn: boolean) {
-    if (busyKind) return;
+  /** User flipped the switch. */
+  async function onToggle(nextOn: boolean) {
+    if (busy) return;
     haptic.light();
 
     if (nextOn) {
-      // Turning ON — first re-check OS capability so we never trigger an
-      // enrolment that the OS can't fulfil.
+      // Re-check OS capability live so we never start an enrolment the OS
+      // can't fulfil.
       const liveCap = await biometricService.getCapability();
-      if (liveCap === 'unavailable') {
-        setCap('unavailable');
-        promptOpenSettings(kind);
+      // Yêu cầu sinh trắc THẬT, không chỉ là passcode ('deviceCredential').
+      // Chỉ 'biometric' mới cho bind bio_token sau khoá gated-bằng-sinh-trắc.
+      if (liveCap !== 'biometric') {
+        setCap(liveCap);
+        promptOpenSettings();
         return;
       }
       setCap(liveCap);
-      // Open the password re-auth modal; the actual enrol fires when the
-      // user confirms inside the modal.
+      // Open the password re-auth modal; the actual enrol fires on confirm.
       setPwInput('');
       setPwError(null);
-      setPwModalKind(kind);
+      setPwModalOpen(true);
       return;
     }
 
-    // Turning OFF — confirm and clear.
+    // Turning OFF — confirm and wipe the device credential.
     Alert.alert(
-      kind === 'face' ? 'Tắt đăng nhập khuôn mặt?' : 'Tắt đăng nhập vân tay?',
-      'Bạn sẽ phải đăng nhập bằng email + mật khẩu cho phương thức này.',
+      'Tắt đăng nhập sinh trắc?',
+      'Bạn sẽ phải đăng nhập bằng email + mật khẩu trên thiết bị này.',
       [
         { text: 'Huỷ', style: 'cancel' },
         {
           text: 'Tắt',
           style: 'destructive',
           onPress: async () => {
-            setBusyKind(kind);
+            setBusy(true);
             try {
-              // Wipe only the kind the user toggled off. The other kind
-              // and the global "biometric enabled" flag stay intact.
               await biometricApi.clearAll();
-              if (kind === 'face') {
-                await secureStorage.setFaceEnrolled(false);
-              } else {
-                await secureStorage.setFingerprintEnrolled(false);
-              }
-              // If both kinds are now off, also flip the global pref.
-              const stillFace = kind !== 'face' && (await secureStorage.isFaceEnrolled());
-              const stillFinger = kind !== 'fingerprint' && (await secureStorage.isFingerprintEnrolled());
-              if (!stillFace && !stillFinger) {
-                await setBio(false);
-              }
+              await setBio(false);
               haptic.success();
             } finally {
               await refresh();
-              setBusyKind(null);
+              setBusy(false);
             }
           },
         },
@@ -171,8 +153,6 @@ export default function BiometricSetupScreen() {
   }
 
   async function confirmPasswordAndEnroll() {
-    if (!pwModalKind) return;
-    const kind = pwModalKind;
     if (!pwInput.trim()) {
       setPwError('Vui lòng nhập mật khẩu');
       haptic.error();
@@ -180,49 +160,45 @@ export default function BiometricSetupScreen() {
     }
     setPwBusy(true);
     setPwError(null);
+    let passedPassword = false;
     try {
       const email = (await secureStorage.getUserEmail()) ?? '';
       if (!email) {
         setPwError('Không tìm thấy email — vui lòng đăng nhập lại');
         return;
       }
-      // Re-authenticate the owner. Throws if password is wrong.
+      // Re-authenticate the owner. Throws if the password is wrong.
       await authApi.login(email, pwInput);
+      passedPassword = true;
 
-      // Close the modal BEFORE the OS biometric prompt fires — keeping
-      // the modal open while the OS popup is up looks broken on Android.
+      // Close the modal BEFORE the OS biometric prompt fires — an open modal
+      // behind the OS popup looks broken on Android.
       setPwInput('');
-      setPwModalKind(null);
-      setBusyKind(kind);
+      setPwModalOpen(false);
+      setBusy(true);
 
-      // The OS biometric prompt fires inside the SecureStore save with
-      // requireAuthentication=true. One prompt only — see src/api/biometric.ts.
-      if (kind === 'face') {
-        await biometricApi.enrollFace(`face:${email}`);
-      } else {
-        await biometricApi.enrollFingerprint(`finger:${email}`);
-      }
+      // ONE OS biometric prompt — fired inside the SecureStore save with
+      // requireAuthentication=true. The device's primary modality is chosen
+      // automatically; the caller never picks face-vs-finger.
+      const { kind: enrolledKind } = await biometricApi.enrollBiometric();
       await setBio(true);
       haptic.success();
       Alert.alert(
         'Đã bật',
-        kind === 'face'
-          ? 'Lần đăng nhập tới bạn có thể chạm "Khuôn mặt" trên màn hình login.'
-          : 'Lần đăng nhập tới bạn có thể chạm "Vân tay" trên màn hình login.',
+        enrolledKind === 'face'
+          ? 'Lần đăng nhập tới, chạm "Đăng nhập bằng sinh trắc học" rồi xác thực bằng khuôn mặt.'
+          : 'Lần đăng nhập tới, chạm "Đăng nhập bằng sinh trắc học" rồi xác thực bằng vân tay.',
       );
     } catch (e: any) {
       const msg = e?.message ?? 'Không bật được — vui lòng thử lại';
-      // If the modal was closed (i.e. we got past password verify and the
-      // failure came from enrol/biometric prompt), surface a top-level alert.
-      if (pwModalKind) {
-        setPwError(msg);
-      } else {
-        Alert.alert('Không bật được', msg);
-      }
+      // Password step failed → modal still open, show inline error.
+      // Enrol/biometric step failed → modal already closed, surface an alert.
+      if (!passedPassword) setPwError(msg);
+      else Alert.alert('Không bật được', msg);
       haptic.error();
     } finally {
       setPwBusy(false);
-      setBusyKind(null);
+      setBusy(false);
       refresh();
     }
   }
@@ -239,7 +215,8 @@ export default function BiometricSetupScreen() {
 
       <ScrollView contentContainerStyle={{ padding: Space.pageHorizontal, paddingBottom: Space.s40 }}>
         <Text style={[Typography.bodyM, { color: Colors.textSecondary, marginBottom: Space.s16 }]}>
-          Bật/tắt nhanh các phương thức đăng nhập sinh trắc cho BudgetBee.
+          Bật đăng nhập nhanh bằng sinh trắc học của thiết bị. Hệ điều hành tự chọn khuôn mặt hay vân tay — bạn chỉ cần
+          quét một lần.
         </Text>
 
         {osUnavailable ? (
@@ -266,56 +243,32 @@ export default function BiometricSetupScreen() {
               style={styles.gateCta}
             >
               <Ionicons name="settings-outline" size={18} color={Colors.white} />
-              <Text style={[Typography.buttonM, { color: Colors.white, marginLeft: 8 }]}>
-                Mở Cài đặt thiết bị
-              </Text>
+              <Text style={[Typography.buttonM, { color: Colors.white, marginLeft: 8 }]}>Mở Cài đặt thiết bị</Text>
             </Pressable>
             <Pressable onPress={refresh} style={styles.gateRefresh}>
-              <Text style={[Typography.buttonM, { color: Colors.primaryDark }]}>
-                Tôi đã bật xong — Kiểm tra lại
-              </Text>
+              <Text style={[Typography.buttonM, { color: Colors.primaryDark }]}>Tôi đã bật xong — Kiểm tra lại</Text>
             </Pressable>
           </View>
         ) : null}
 
-        {/* Face toggle */}
+        {/* ONE unified biometric toggle */}
         <ToggleRow
-          icon="happy-outline"
-          iconBg="rgba(59,130,246,0.12)"
-          iconColor={Colors.info}
-          title="Đăng nhập bằng khuôn mặt"
-          subtitle={
-            osUnavailable
-              ? 'Bật Face ID / Face Unlock trong Cài đặt trước'
-              : isFaceOn
-              ? 'Đang bật — chạm "Khuôn mặt" trên màn hình login'
-              : 'Cho phép quét khuôn mặt thay vì nhập mật khẩu'
-          }
-          value={isFaceOn}
-          busy={busyKind === 'face'}
-          disabled={osUnavailable && !isFaceOn}
-          onValueChange={(v) => onToggle('face', v)}
-          onLockedTap={() => promptOpenSettings('face')}
-        />
-
-        {/* Fingerprint toggle */}
-        <ToggleRow
-          icon="finger-print"
+          icon={kindIcon}
           iconBg="rgba(189,232,62,0.18)"
           iconColor={Colors.primaryDark}
-          title="Đăng nhập bằng vân tay"
+          title="Đăng nhập bằng sinh trắc học"
           subtitle={
             osUnavailable
-              ? 'Đăng ký vân tay trong Cài đặt thiết bị trước'
-              : isFingerOn
-              ? 'Đang bật — chạm "Vân tay" trên màn hình login'
-              : 'Cho phép quét vân tay thay vì nhập mật khẩu'
+              ? 'Bật Face ID / vân tay trong Cài đặt thiết bị trước'
+              : bioEnrolled
+              ? `Đang bật — dùng ${kindLabel} để đăng nhập nhanh`
+              : 'Dùng khuôn mặt hoặc vân tay thay vì nhập mật khẩu'
           }
-          value={isFingerOn}
-          busy={busyKind === 'fingerprint'}
-          disabled={osUnavailable && !isFingerOn}
-          onValueChange={(v) => onToggle('fingerprint', v)}
-          onLockedTap={() => promptOpenSettings('fingerprint')}
+          value={bioEnrolled}
+          busy={busy}
+          disabled={osUnavailable && !bioEnrolled}
+          onValueChange={onToggle}
+          onLockedTap={promptOpenSettings}
         />
 
         <View style={styles.usageCard}>
@@ -326,9 +279,7 @@ export default function BiometricSetupScreen() {
         </View>
 
         <View style={styles.usageCard}>
-          <Text style={[Typography.labelL, { marginBottom: 8, color: Colors.warning }]}>
-            Mã PIN (riêng) dùng cho:
-          </Text>
+          <Text style={[Typography.labelL, { marginBottom: 8, color: Colors.warning }]}>Mã PIN (riêng) dùng cho:</Text>
           <Bullet text="Thêm tài khoản ngân hàng mới" />
           <Bullet text="Bật/tắt sinh trắc học" />
           <Bullet text="Đổi mã PIN (cần thêm OTP email)" />
@@ -337,12 +288,12 @@ export default function BiometricSetupScreen() {
 
       {/* Inline password modal — re-authenticate owner before enrolling. */}
       <Modal
-        visible={pwModalKind !== null}
+        visible={pwModalOpen}
         transparent
         animationType="fade"
         onRequestClose={() => {
           if (pwBusy) return;
-          setPwModalKind(null);
+          setPwModalOpen(false);
         }}
       >
         <KeyboardAvoidingView
@@ -353,18 +304,14 @@ export default function BiometricSetupScreen() {
             <View style={styles.modalIcon}>
               <Ionicons name="key" size={28} color={Colors.primaryDark} />
             </View>
-            <Text style={[Typography.headingM, { textAlign: 'center', marginTop: 12 }]}>
-              Xác nhận mật khẩu
-            </Text>
+            <Text style={[Typography.headingM, { textAlign: 'center', marginTop: 12 }]}>Xác nhận mật khẩu</Text>
             <Text
               style={[
                 Typography.bodyS,
                 { color: Colors.textSecondary, textAlign: 'center', marginTop: 6, paddingHorizontal: 8 },
               ]}
             >
-              {pwModalKind === 'face'
-                ? 'Để bật đăng nhập khuôn mặt, vui lòng nhập lại mật khẩu BudgetBee.'
-                : 'Để bật đăng nhập vân tay, vui lòng nhập lại mật khẩu BudgetBee.'}
+              Để bật đăng nhập sinh trắc, vui lòng nhập lại mật khẩu BudgetBee.
             </Text>
 
             <View style={styles.modalField}>
@@ -398,7 +345,7 @@ export default function BiometricSetupScreen() {
               <Pressable
                 onPress={() => {
                   if (pwBusy) return;
-                  setPwModalKind(null);
+                  setPwModalOpen(false);
                   setPwInput('');
                   setPwError(null);
                 }}
@@ -420,10 +367,7 @@ export default function BiometricSetupScreen() {
             </View>
 
             <Text
-              style={[
-                Typography.caption,
-                { color: Colors.textSecondary, marginTop: 12, textAlign: 'center' },
-              ]}
+              style={[Typography.caption, { color: Colors.textSecondary, marginTop: 12, textAlign: 'center' }]}
             >
               Sau khi xác nhận, hệ điều hành sẽ hỏi quét sinh trắc 1 lần để gắn vào tài khoản.
             </Text>

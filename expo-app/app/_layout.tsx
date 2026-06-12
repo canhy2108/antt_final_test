@@ -63,10 +63,7 @@ export default function RootLayout() {
           <Stack.Screen name="account/connect-bank" options={{ presentation: 'modal' }} />
           <Stack.Screen name="budget/new" options={{ presentation: 'modal' }} />
           <Stack.Screen name="biometric/setup" />
-          <Stack.Screen name="biometric/face-scan" options={{ presentation: 'modal' }} />
-          <Stack.Screen name="biometric/fingerprint-scan" options={{ presentation: 'modal' }} />
-          <Stack.Screen name="biometric/face-login" options={{ presentation: 'modal' }} />
-          <Stack.Screen name="biometric/finger-login" options={{ presentation: 'modal' }} />
+          <Stack.Screen name="biometric/login" options={{ presentation: 'modal' }} />
           <Stack.Screen name="pin-change" options={{ presentation: 'modal' }} />
           <Stack.Screen name="notifications" />
           <Stack.Screen name="savings/index" />

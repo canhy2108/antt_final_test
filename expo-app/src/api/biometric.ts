@@ -80,29 +80,32 @@ async function persistAuth(payload: ServerLoginResponse): Promise<User> {
   } as User;
 }
 
-async function ensureOsBiometricPass(reason: string): Promise<void> {
-  const cap = await biometricService.getCapability();
-  if (cap === 'unavailable') {
-    throw new Error('Thiết bị chưa cài đặt sinh trắc OS. Vui lòng bật Face ID / vân tay trong cài đặt.');
-  }
-  const res = await biometricService.authenticate(reason);
-  if (res === 'success') return;
-  if (res === 'lockedOut') {
-    throw new Error('Sinh trắc bị khoá tạm thời. Vui lòng thử lại sau hoặc dùng mật khẩu thiết bị.');
-  }
-  if (res === 'notEnrolled') {
-    throw new Error('Chưa đăng ký sinh trắc trên thiết bị. Vui lòng cài đặt Face ID / vân tay trong Settings.');
-  }
-  throw new Error('Xác thực sinh trắc thất bại — vui lòng thử lại.');
+/**
+ * Decide which device-bound credential to use for a unified biometric login.
+ *
+ * Normal devices only ever have one (enrolment always uses the OS's primary
+ * modality). A device that enrolled on an older build may have both; in that
+ * case we prefer whatever the OS reports as primary so the prompt the user
+ * sees (Face ID vs fingerprint) matches the credential we're unlocking.
+ * Returns null when nothing is enrolled on this device.
+ */
+async function resolveEnrolledKind(): Promise<'face' | 'fingerprint' | null> {
+  const [face, finger] = await Promise.all([
+    secureStorage.isFaceEnrolled(),
+    secureStorage.isFingerprintEnrolled(),
+  ]);
+  if (!face && !finger) return null;
+  if (face && finger) return biometricService.primaryKind();
+  return face ? 'face' : 'fingerprint';
 }
 
 async function enroll(kind: 'face' | 'fingerprint', label?: string): Promise<{ credentialId: number }> {
   // Single OS biometric prompt for the whole enrolment.
   //
-  // Previous version called `ensureOsBiometricPass()` here AND then wrote to
-  // SecureStore with `requireAuthentication: true` — which on Android creates
-  // a Keystore key bound to the biometric session and triggers a second
-  // prompt the moment the key is generated. Two prompts = "scan twice" UX.
+  // The earlier version ran an explicit OS biometric check here AND then wrote
+  // to SecureStore with `requireAuthentication: true` — which on Android
+  // creates a Keystore key bound to the biometric session and triggers a
+  // second prompt the moment the key is generated. Two prompts = "scan twice".
   //
   // Now: the password screen already confirmed account ownership, and the
   // single biometric prompt fires inside `saveBioCredential` (Android) /
@@ -185,38 +188,50 @@ async function login(kind: 'face' | 'fingerprint'): Promise<{ user: User; matche
 }
 
 export const biometricApi = {
-  /** Enroll face for the currently-logged-in user on this device. */
-  async enrollFace(label?: string): Promise<{ credentialId: number }> {
-    return enroll('face', label);
+  /**
+   * Unified enrolment — Task 2.
+   *
+   * The caller NEVER picks face-vs-fingerprint. We read the device's primary
+   * modality (`biometricService.primaryKind()`) and bind a single device
+   * credential. Exactly ONE OS biometric prompt fires (inside the Keystore
+   * save). The caller MUST have re-verified the account owner by password
+   * before calling this — the OS prompt proves "device owner present", the
+   * password proved "account owner".
+   */
+  async enrollBiometric(label?: string): Promise<{ credentialId: number; kind: 'face' | 'fingerprint' }> {
+    const kind = await biometricService.primaryKind();
+    const res = await enroll(kind, label ?? `bio:${kind}`);
+    return { credentialId: res.credentialId, kind };
   },
 
-  /** Enroll fingerprint for the currently-logged-in user on this device. */
-  async enrollFingerprint(label?: string): Promise<{ credentialId: number }> {
-    return enroll('fingerprint', label);
+  /**
+   * Unified login — Task 2.
+   *
+   * Reads whichever device-bound credential exists on this device and fires a
+   * single OS prompt to release the bio_token. One code path; the OS decides
+   * whether the user shows a face or a finger. No more separate face-login /
+   * finger-login screens.
+   */
+  async loginByBiometric(): Promise<{ user: User; matchedBy: 'face' | 'fingerprint' }> {
+    const kind = await resolveEnrolledKind();
+    if (!kind) {
+      throw new Error(
+        'Chưa đăng ký sinh trắc học trên thiết bị này. Vui lòng đăng nhập bằng mật khẩu, rồi bật sinh trắc trong phần Cài đặt.',
+      );
+    }
+    return login(kind);
   },
 
-  /** Login by face. Requires prior enrolment on THIS device. */
-  async loginByFace(): Promise<{ user: User; matchedBy: 'face' }> {
-    return login('face') as Promise<{ user: User; matchedBy: 'face' }>;
+  /** True if ANY biometric credential is enrolled on this device. */
+  async hasAnyEnrolled(): Promise<boolean> {
+    const [face, finger] = await Promise.all([
+      secureStorage.isFaceEnrolled(),
+      secureStorage.isFingerprintEnrolled(),
+    ]);
+    return face || finger;
   },
 
-  /** Login by fingerprint. Requires prior enrolment on THIS device. */
-  async loginByFingerprint(): Promise<{ user: User; matchedBy: 'fingerprint' }> {
-    return login('fingerprint') as Promise<{ user: User; matchedBy: 'fingerprint' }>;
-  },
-
-  /** True if there's a face credential stashed in Keystore on this device. */
-  async hasFaceEnrolled(): Promise<boolean> {
-    const raw = await secureStorage.isFaceEnrolled();
-    return raw;
-  },
-
-  /** True if there's a fingerprint credential stashed in Keystore on this device. */
-  async hasFingerprintEnrolled(): Promise<boolean> {
-    return secureStorage.isFingerprintEnrolled();
-  },
-
-  /** Wipe biometric data on logout / unenroll. */
+  /** Wipe all biometric data on logout / unenroll. */
   async clearAll(): Promise<void> {
     await secureKeystore.clearAll();
     await secureStorage.clearAllBioCredentials();
