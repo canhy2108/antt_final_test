@@ -43,6 +43,17 @@ Route::post('/register', [AuthController::class, 'selfRegister']);
 Route::post('/verify-otp', [AuthController::class, 'verifyOtp']);
 Route::post('/resend-otp', [AuthController::class, 'resendOtp']);
 
+// Quên / đặt lại mật khẩu (public). forgot-password gửi OTP purpose riêng;
+// reset-password verify OTP + đổi mật khẩu + HUỶ toàn bộ session/refresh token cũ.
+Route::post('/forgot-password', [AuthController::class, 'forgotPassword']);
+Route::post('/reset-password', [AuthController::class, 'resetPassword']);
+
+// Tầng 2 — magic link (bỏ gõ OTP tay). request-reset-link gửi email chứa link
+// mở thẳng app; reset-password-link verify token phía server + đổi mật khẩu +
+// HUỶ toàn bộ session. Token 256-bit, sha256-at-rest, dùng-một-lần, hết hạn ngắn.
+Route::post('/request-reset-link', [AuthController::class, 'requestResetLink']);
+Route::post('/reset-password-link', [AuthController::class, 'resetPasswordViaLink']);
+
 // Auth-required: request an OTP to confirm a sensitive action
 Route::post('/sensitive-otp', [AuthController::class, 'requestSensitiveOtp'])->middleware('auth:sanctum');
 

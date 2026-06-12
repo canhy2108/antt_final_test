@@ -26,11 +26,12 @@ class User extends Authenticatable
         'email',
         'password',
         'currency_id',
+        // Chỉ giữ MỐC THỜI GIAN đăng ký sinh trắc (để UI hiển thị "đã bật").
+        // KHÔNG còn lưu ảnh khuôn mặt thô / chữ ký thời gian — xem migration
+        // 2026_06_11_120000_drop_face_image_from_users. Sinh trắc thật do OS
+        // (Secure Enclave / Keystore) quản lý, server không chạm dữ liệu thô.
         'face_enrolled_at',
         'fingerprint_enrolled_at',
-        'face_image_base64',
-        'face_scan_ms',
-        'fingerprint_hold_ms',
         'last_login_at',
         'login_count',
     ];
@@ -39,7 +40,6 @@ class User extends Authenticatable
 
     /**
      * The attributes that should be hidden for serialization.
-     * face_image_base64 NEVER goes out in API responses.
      *
      * @var array<int, string>
      */
@@ -47,7 +47,6 @@ class User extends Authenticatable
         'password',
         'remember_token',
         'currency',
-        'face_image_base64',
     ];
 
     /**

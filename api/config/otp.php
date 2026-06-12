@@ -48,4 +48,20 @@ return [
     */
     'pin_change_expire_minutes' => (int) env('OTP_PIN_CHANGE_EXPIRE_MINUTES', 5),
     'pin_change_daily_limit' => (int) env('OTP_PIN_CHANGE_DAILY_LIMIT', 3),
+
+    /*
+    |--------------------------------------------------------------------------
+    | Magic link đặt lại mật khẩu (Tầng 2 — bỏ gõ OTP tay)
+    |--------------------------------------------------------------------------
+    |  - expire_minutes: token sống ngắn (mặc định 30 phút), dùng-một-lần.
+    |  - limit / window: chống spam xin link (mặc định 3 link / 15 phút / user).
+    |  - base: scheme deep link mở thẳng app vào route 'reset-link' (màn đặt mật
+    |    khẩu qua link). Server ghép '?token=<token thô>'. KHÁC route 'reset-password'
+    |    (màn OTP gõ tay) để hai luồng không đụng nhau. Đổi qua RESET_LINK_BASE nếu
+    |    dùng Universal/App Links thay custom scheme.
+    */
+    'reset_link_expire_minutes' => (int) env('RESET_LINK_EXPIRE_MINUTES', 30),
+    'reset_link_limit' => (int) env('RESET_LINK_LIMIT', 3),
+    'reset_link_window_minutes' => (int) env('RESET_LINK_WINDOW_MINUTES', 15),
+    'reset_link_base' => env('RESET_LINK_BASE', 'budgetbee://reset-link'),
 ];

@@ -5,8 +5,11 @@ namespace App\Http\Controllers;
 use Illuminate\Http\Request;
 use App\Models\User;
 use App\Services\OtpService;
+use App\Services\PasswordResetLinkService;
+use App\Mail\SendResetLinkMail;
 use Illuminate\Support\Facades\Hash;
 use Illuminate\Support\Facades\Auth;
+use Illuminate\Support\Facades\Mail;
 use Illuminate\Support\Facades\RateLimiter;
 use Illuminate\Support\Facades\Log;
 use Illuminate\Validation\Rules\Password;
@@ -188,6 +191,234 @@ class AuthController extends Controller
         }
 
         return response()->json($payload);
+    }
+
+    /**
+     * BƯỚC 1 — Quên mật khẩu: gửi OTP đặt lại tới email ĐÃ ĐĂNG KÝ.
+     *
+     * Chống dò tài khoản (account enumeration): LUÔN trả về cùng một thông
+     * điệp "nếu email tồn tại, mã đã được gửi", bất kể email có trong hệ
+     * thống hay không. Kẻ tấn công không phân biệt được email nào đã đăng ký.
+     *
+     * OTP dùng purpose RIÊNG (PURPOSE_RESET_PASSWORD) — KHÁC mã đăng ký /
+     * đăng nhập / đổi PIN, nên mã reset không thể tái sử dụng cho mục đích
+     * khác. Hết hạn ngắn (config otp.expire_minutes) + rate-limit số lần gửi.
+     */
+    public function forgotPassword(Request $request)
+    {
+        $validated = $request->validate(['email' => 'required|email']);
+
+        $user = User::where('email', strtolower($validated['email']))->first();
+
+        // Thông điệp CHUNG — không tiết lộ email có tồn tại hay không.
+        $generic = [
+            'message' => 'Nếu email tồn tại trong hệ thống, mã đặt lại đã được gửi.',
+            'expires_in_minutes' => (int) config('otp.expire_minutes', 10),
+        ];
+
+        if ($user === null) {
+            return response()->json($generic);
+        }
+
+        // Rate limit: tránh spam gửi mail tới một địa chỉ. Vẫn trả generic
+        // để không lộ sự tồn tại của email; chỉ ngừng gửi thêm mail.
+        if (OtpService::hasHitResendLimit($user, OtpService::PURPOSE_RESET_PASSWORD)) {
+            $this->auditLog('forgot_password_rate_limited', $user->email, ['ip' => $request->ip()]);
+            return response()->json($generic);
+        }
+
+        $otp = OtpService::generate($user, OtpService::PURPOSE_RESET_PASSWORD, $request->ip());
+        OtpService::send($user, $otp);
+
+        $this->auditLog('forgot_password_otp_sent', $user->email, ['ip' => $request->ip()]);
+
+        // F1 (CRITICAL) — KHÔNG BAO GIỜ echo mã đặt lại trong response, kể cả ở
+        // môi trường dev. /forgot-password là endpoint KHÔNG cần đăng nhập: bất
+        // kỳ ai biết email nạn nhân đều gọi được. Nếu trả mã ở đây thì kẻ tấn
+        // công đọc thẳng OTP từ JSON rồi reset mật khẩu → chiếm tài khoản. Cờ
+        // otp.dev_return_code CỐ TÌNH không áp dụng cho luồng reset; mã chỉ đi
+        // qua kênh email (OtpService::send ở trên).
+        return response()->json($generic);
+    }
+
+    /**
+     * BƯỚC 2 — Đặt lại mật khẩu bằng OTP.
+     *
+     * Sau khi đổi mật khẩu thành công, HUỶ TOÀN BỘ phiên cũ của user:
+     *   - Xoá mọi Sanctum personal access token  → $user->tokens()->delete()
+     *   - Thu hồi mọi refresh token              → is_revoked = true
+     * => Mọi thiết bị đang đăng nhập bị đá ra; nếu kẻ tấn công đang giữ token
+     *    cũ thì mất quyền ngay lập tức. KHÔNG tự cấp token mới ở đây — buộc
+     *    user đăng nhập lại để chứng minh họ biết mật khẩu mới.
+     *
+     * Mỗi tài khoản reset qua chính email của nó (đa tài khoản không xung đột)
+     * vì OTP gắn với user_id cụ thể.
+     */
+    public function resetPassword(Request $request)
+    {
+        // Throttle brute-force endpoint theo (email + IP).
+        $key = 'reset_pw_' . strtolower((string) $request->input('email')) . '|' . $request->ip();
+        if (RateLimiter::tooManyAttempts($key, 5)) {
+            $seconds = RateLimiter::availableIn($key);
+            return response()->json([
+                'message' => "Quá nhiều lần thử. Vui lòng đợi {$seconds} giây.",
+                'retry_after' => $seconds,
+            ], 429);
+        }
+
+        $validated = $request->validate([
+            'email' => 'required|email',
+            'code' => 'required|string|min:4|max:10',
+            'password' => $this->passwordRules(),
+            'confirm_password' => 'required|string|same:password',
+        ]);
+
+        $user = User::where('email', strtolower($validated['email']))->first();
+
+        // Verify OTP (purpose reset). Trả message CHUNG khi sai để không lộ
+        // email tồn tại hay không. OtpService::verify tự khoá sau 5 lần sai.
+        if ($user === null
+            || !OtpService::verify($user, $validated['code'], OtpService::PURPOSE_RESET_PASSWORD)) {
+            RateLimiter::hit($key, 60 * 15); // 15 phút
+            $this->auditLog('reset_password_failed', $validated['email'], ['ip' => $request->ip()]);
+            return response()->json([
+                'message' => 'Mã đặt lại không đúng hoặc đã hết hạn.',
+            ], 422);
+        }
+
+        RateLimiter::clear($key);
+
+        // Đổi mật khẩu + huỷ mọi phiên cũ qua helper dùng chung với luồng
+        // magic link (resetPasswordViaLink). Một nguồn sự thật duy nhất cho
+        // phần bảo mật quan trọng nhất.
+        return $this->finalizePasswordReset($user, $validated['password'], $request);
+    }
+
+    /**
+     * BƯỚC 1 (Tầng 2) — Quên mật khẩu qua MAGIC LINK: gửi email chứa liên kết
+     * mở thẳng app, người dùng KHÔNG phải gõ mã 6 số tay.
+     *
+     * Token là chuỗi ngẫu nhiên 256-bit (CSPRNG). DB chỉ lưu sha256(token);
+     * token thô chỉ nằm trong URL của email. Hết hạn ngắn + dùng-một-lần
+     * (PasswordResetLinkService). Vẫn chống dò tài khoản: LUÔN trả generic.
+     *
+     * OTP gõ tay (forgotPassword) vẫn giữ làm fallback — hai luồng song song.
+     */
+    public function requestResetLink(Request $request)
+    {
+        $validated = $request->validate(['email' => 'required|email']);
+
+        $user = User::where('email', strtolower($validated['email']))->first();
+
+        $generic = [
+            'message' => 'Nếu email tồn tại trong hệ thống, liên kết đặt lại đã được gửi.',
+            'expires_in_minutes' => PasswordResetLinkService::ttlMinutes(),
+        ];
+
+        if ($user === null) {
+            return response()->json($generic);
+        }
+
+        // Rate limit phát hành link — vẫn trả generic để không lộ email tồn tại.
+        if (PasswordResetLinkService::hasHitLimit($user)) {
+            $this->auditLog('reset_link_rate_limited', $user->email, ['ip' => $request->ip()]);
+            return response()->json($generic);
+        }
+
+        // Phát hành token THÔ (chỉ tồn tại trong bộ nhớ tại đây + trong URL email).
+        $token = PasswordResetLinkService::issue($user, $request->ip());
+        $resetUrl = config('otp.reset_link_base') . '?token=' . $token;
+
+        // Gửi mail trong try/catch — KHÔNG log token/URL/exception message vì
+        // message có thể chứa URL (token). Chỉ log loại exception.
+        try {
+            Mail::to($user->email)->send(
+                new SendResetLinkMail($user, $resetUrl, PasswordResetLinkService::ttlMinutes())
+            );
+        } catch (\Throwable $e) {
+            Log::error('Reset link mail send failed', [
+                'user_id' => $user->id,
+                'error_type' => get_class($e),
+            ]);
+        }
+
+        $this->auditLog('reset_link_sent', $user->email, ['ip' => $request->ip()]);
+
+        return response()->json($generic);
+    }
+
+    /**
+     * BƯỚC 2 (Tầng 2) — Đặt lại mật khẩu bằng TOKEN từ magic link.
+     *
+     * Không cần email/OTP: token tự định danh user (gắn user_id khi phát hành).
+     * consume() verify phía server (băm lại + so token_hash), kiểm hết hạn,
+     * đốt single-use. Sai/đã dùng/hết hạn → 422 generic. Thành công → đổi mật
+     * khẩu + HUỶ toàn bộ session (finalizePasswordReset). KHÔNG auto-login.
+     */
+    public function resetPasswordViaLink(Request $request)
+    {
+        // Throttle brute-force token theo IP (token không gắn email để key theo).
+        $key = 'reset_link_' . $request->ip();
+        if (RateLimiter::tooManyAttempts($key, 10)) {
+            $seconds = RateLimiter::availableIn($key);
+            return response()->json([
+                'message' => "Quá nhiều lần thử. Vui lòng đợi {$seconds} giây.",
+                'retry_after' => $seconds,
+            ], 429);
+        }
+
+        $validated = $request->validate([
+            'token' => 'required|string',
+            'password' => $this->passwordRules(),
+            'confirm_password' => 'required|string|same:password',
+        ]);
+
+        $user = PasswordResetLinkService::consume($validated['token']);
+
+        if ($user === null) {
+            RateLimiter::hit($key, 60 * 15); // 15 phút
+            // KHÔNG log token. Audit không có danh tính vì token sai → không có user.
+            $this->auditLog('reset_link_failed', '', ['ip' => $request->ip()]);
+            return response()->json([
+                'message' => 'Liên kết đặt lại không hợp lệ hoặc đã hết hạn.',
+            ], 422);
+        }
+
+        RateLimiter::clear($key);
+
+        return $this->finalizePasswordReset($user, $validated['password'], $request);
+    }
+
+    /**
+     * Phần lõi đặt lại mật khẩu — dùng CHUNG cho cả resetPassword (OTP tay) và
+     * resetPasswordViaLink (magic link).
+     *
+     * Sau khi đổi mật khẩu, HUỶ TOÀN BỘ phiên cũ:
+     *   - Xoá mọi Sanctum personal access token → $user->tokens()->delete()
+     *   - Thu hồi mọi refresh token             → is_revoked = true
+     * => Mọi thiết bị bị đá ra; kẻ tấn công giữ token cũ mất quyền ngay. KHÔNG
+     *    tự cấp token mới — buộc user đăng nhập lại bằng mật khẩu mới.
+     */
+    private function finalizePasswordReset(User $user, string $newPassword, Request $request)
+    {
+        // Hash::make tường minh — đồng nhất với register()/selfRegister().
+        $user->password = Hash::make($newPassword);
+        $user->save();
+
+        // HUỶ MỌI PHIÊN CŨ — phần quan trọng nhất về bảo mật.
+        $user->tokens()->delete(); // mọi Sanctum access token của user
+        RefreshToken::where('user_id', $user->id)
+            ->where('is_revoked', false)
+            ->update(['is_revoked' => true]); // mọi refresh token còn hiệu lực
+
+        $this->auditLog('reset_password_success', $user->email, [
+            'ip' => $request->ip(),
+            'user_id' => $user->id,
+        ]);
+
+        return response()->json([
+            'message' => 'Đặt lại mật khẩu thành công. Vui lòng đăng nhập lại bằng mật khẩu mới.',
+        ]);
     }
 
     /**
