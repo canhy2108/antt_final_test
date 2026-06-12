@@ -34,3 +34,12 @@ expo-app/.claude/
 # Old native Android scaffold (replaced by Expo)
 # (Already removed in the source tree; kept here so it stays gone.)
 android/.gradle/
+
+# Stray Gradle build artifacts at repo root (binary junk — never commit;
+# these were what made `git add`/push choke). Ignore at root level.
+/.gradle/
+/build/
+expo-app/.gradle/
+expo-app/build/
+expo-app/android/.gradle/
+expo-app/android/build/
