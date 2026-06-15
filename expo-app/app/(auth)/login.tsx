@@ -8,22 +8,23 @@ import { TextField } from '@/components/TextField';
 import { PrimaryButton } from '@/components/PrimaryButton';
 import { useAuth } from '@/stores/auth';
 import { biometricService } from '@/services/biometric';
+import { biometricApi } from '@/api/biometric';
 import { haptic } from '@/utils/haptics';
 
 /**
- * Login screen — unified device-biometric quick-login (Task 1 + Task 2).
+ * Login screen.
  *
- * ONE biometric button (not separate "Khuôn mặt" / "Vân tay"). Tapping it
- * opens the single `/biometric/login` screen, which fires exactly one OS
- * prompt — the OS decides whether the user shows a face or a finger. The
- * button is hidden entirely on devices with no biometric sensor.
+ * Nút vân tay nhỏ cạnh nút "Đăng nhập" gọi THẲNG cửa sổ vân tay/sinh trắc của
+ * hệ điều hành (không qua màn trung gian). Ẩn khi máy không có cảm biến.
  */
 export default function LoginScreen() {
   const login = useAuth((s) => s.login);
+  const setUser = useAuth((s) => s.setUser);
 
   const [email, setEmail] = useState('');
   const [password, setPassword] = useState('');
   const [loading, setLoading] = useState(false);
+  const [bioLoading, setBioLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
 
   // Whether to show the biometric shortcut + which icon/label to use. We gate
@@ -70,9 +71,24 @@ export default function LoginScreen() {
     }
   }
 
-  function onBiometricLogin() {
+  async function onBiometricLogin() {
+    if (bioLoading) return;
     haptic.light();
-    router.push('/biometric/login');
+    setError(null);
+    setBioLoading(true);
+    try {
+      // Gọi thẳng cửa sổ vân tay/sinh trắc của hệ điều hành. SecureStore mở
+      // bio_token sau khi vân tay khớp → đăng nhập ngay, không màn trung gian.
+      const { user } = await biometricApi.loginByBiometric();
+      setUser(user);
+      haptic.success();
+      router.replace('/(tabs)');
+    } catch (e: any) {
+      haptic.error();
+      setError(e?.message ?? 'Đăng nhập vân tay thất bại');
+    } finally {
+      setBioLoading(false);
+    }
   }
 
   return (
@@ -89,38 +105,6 @@ export default function LoginScreen() {
           <Text style={[Typography.bodyM, { color: Colors.textSecondary, textAlign: 'center', marginTop: 6 }]}>
             Đăng nhập để tiếp tục với BudgetBee
           </Text>
-
-          {/* BIOMETRIC — ONE unified button. The OS decides face vs finger;
-              we only swap the icon/label hint. Hidden when the device has no
-              biometric sensor at all (Task 2). */}
-          {bioHardware ? (
-            <>
-              <Pressable onPress={onBiometricLogin} style={styles.bioBtn}>
-                <View style={[styles.bioIcon, { backgroundColor: 'rgba(189,232,62,0.18)' }]}>
-                  <Ionicons
-                    name={bioKind === 'face' ? 'happy-outline' : 'finger-print'}
-                    size={30}
-                    color={Colors.primaryDark}
-                  />
-                </View>
-                <View style={{ flex: 1, marginLeft: 14 }}>
-                  <Text style={[Typography.labelL, { color: Colors.dark }]}>Đăng nhập bằng sinh trắc học</Text>
-                  <Text style={[Typography.caption, { color: Colors.textSecondary, marginTop: 2 }]}>
-                    {bioKind === 'face' ? 'Khuôn mặt / Face ID — nhanh nhất' : 'Vân tay — nhanh nhất'}
-                  </Text>
-                </View>
-                <Ionicons name="chevron-forward" size={20} color={Colors.textSecondary} />
-              </Pressable>
-
-              <View style={styles.divider}>
-                <View style={styles.line} />
-                <Text style={[Typography.caption, { marginHorizontal: 12, color: Colors.textSecondary }]}>
-                  hoặc đăng nhập bằng mật khẩu
-                </Text>
-                <View style={styles.line} />
-              </View>
-            </>
-          ) : null}
 
           <View style={{ marginTop: Space.s16, gap: Space.s16 }}>
             <TextField
@@ -151,7 +135,37 @@ export default function LoginScreen() {
             <Text style={[Typography.labelM, { color: Colors.primary }]}>Quên mật khẩu?</Text>
           </Pressable>
 
-          <PrimaryButton label="Đăng nhập" onPress={onSubmit} loading={loading} style={{ marginTop: Space.s24 }} />
+          <View style={styles.submitRow}>
+            <View style={{ flex: 1 }}>
+              <PrimaryButton label="Đăng nhập" onPress={onSubmit} loading={loading} />
+            </View>
+            {bioHardware ? (
+              <Pressable
+                onPress={onBiometricLogin}
+                style={styles.fingerQuickBtn}
+                accessibilityRole="button"
+                accessibilityLabel="Đăng nhập nhanh bằng vân tay"
+              >
+                <Ionicons name="finger-print" size={28} color={Colors.primaryDark} />
+              </Pressable>
+            ) : null}
+            {bioHardware ? (
+              <Pressable
+                onPress={() => router.push('/face/scan?intent=login' as any)}
+                style={styles.fingerQuickBtn}
+                accessibilityRole="button"
+                accessibilityLabel="Đăng nhập bằng khuôn mặt"
+              >
+                <Ionicons name="happy-outline" size={28} color={Colors.primaryDark} />
+              </Pressable>
+            ) : null}
+          </View>
+
+          {bioHardware ? (
+            <Text style={[Typography.caption, styles.bioHint]}>
+              Chạm vân tay hoặc khuôn mặt để đăng nhập nhanh — làm theo cửa sổ xác thực của máy.
+            </Text>
+          ) : null}
 
           <View style={styles.bottomRow}>
             <Text style={[Typography.bodyM, { color: Colors.textSecondary }]}>Chưa có tài khoản? </Text>
@@ -193,5 +207,18 @@ const styles = StyleSheet.create({
   bioIcon: { width: 52, height: 52, borderRadius: 26, alignItems: 'center', justifyContent: 'center' },
   divider: { flexDirection: 'row', alignItems: 'center', marginTop: Space.s24 },
   line: { flex: 1, height: 1, backgroundColor: Colors.border },
+  submitRow: { flexDirection: 'row', alignItems: 'center', gap: 12, marginTop: Space.s24 },
+  bioHint: { color: Colors.textSecondary, textAlign: 'center', marginTop: Space.s12 },
+  fingerQuickBtn: {
+    width: 56,
+    height: 56,
+    borderRadius: Radius.full,
+    backgroundColor: Colors.surface,
+    borderWidth: 1,
+    borderColor: Colors.border,
+    alignItems: 'center',
+    justifyContent: 'center',
+    ...Shadow.s,
+  },
   bottomRow: { flexDirection: 'row', justifyContent: 'center', marginTop: Space.s32 },
 });

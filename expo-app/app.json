@@ -53,8 +53,7 @@
         {
           "faceIDPermission": "BudgetBee dùng Face ID để mở khoá ứng dụng."
         }
-      ],
-      "expo-screen-capture"
+      ]
     ],
     "experiments": {
       "typedRoutes": true

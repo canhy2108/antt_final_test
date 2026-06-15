@@ -25,7 +25,7 @@ class Otp extends Model
         'used_at' => 'datetime',
     ];
 
-    protected $hidden = ['code']; // Never serialize raw code
+    protected $hidden = ['code', 'plainCode']; // Never serialize raw/hashed code
 
     public function user(): BelongsTo
     {

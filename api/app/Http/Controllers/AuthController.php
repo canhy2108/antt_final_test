@@ -99,7 +99,7 @@ class AuthController extends Controller
         ];
 
         if (config('otp.dev_return_code')) {
-            $payload['dev_otp_code'] = $otp->code;
+            $payload['dev_otp_code'] = $otp->plainCode ?? $otp->code;
         }
 
         return response()->json($payload, 201);
@@ -132,7 +132,7 @@ class AuthController extends Controller
         $user->forceFill(['email_verified_at' => now()])->save();
 
         $tokenName = $request->header('X-Device-Id') ?? 'auth_token';
-        $token = $user->createToken($tokenName, ['*'], now()->addDays(30))->plainTextToken;
+        $token = $user->createToken($tokenName, ['*'], now()->addHours(1))->plainTextToken;
 
         // Create a refresh token (rotation-ready)
         $refreshPlain = bin2hex(random_bytes(32));
@@ -151,7 +151,7 @@ class AuthController extends Controller
             'access_token' => $token,
             'refresh_token' => $refreshPlain,
             'token_type' => 'Bearer',
-            'expires_in' => 2592000, // 30 days, matches addDays(30) above
+            'expires_in' => 3600, // 1 giờ — access token ngắn hạn; client tự gọi /auth/refresh
             'user' => [
                 'id' => $user->id,
                 'name' => $user->name,
@@ -187,7 +187,7 @@ class AuthController extends Controller
 
         $payload = ['message' => 'Mã mới đã được gửi.'];
         if (config('otp.dev_return_code')) {
-            $payload['dev_otp_code'] = $otp->code;
+            $payload['dev_otp_code'] = $otp->plainCode ?? $otp->code;
         }
 
         return response()->json($payload);
@@ -451,7 +451,7 @@ class AuthController extends Controller
         ];
 
         if (config('otp.dev_return_code')) {
-            $payload['dev_otp_code'] = $otp->code;
+            $payload['dev_otp_code'] = $otp->plainCode ?? $otp->code;
         }
 
         return response()->json($payload);
@@ -535,13 +535,13 @@ class AuthController extends Controller
                 'email' => $user->email,
             ];
             if (config('otp.dev_return_code')) {
-                $payload['dev_otp_code'] = $otp->code;
+                $payload['dev_otp_code'] = $otp->plainCode ?? $otp->code;
             }
             return response()->json($payload, 403);
         }
 
         $tokenName = $request->header('X-Device-Id') ?? 'auth_token';
-        $token = $user->createToken($tokenName, ['*'], now()->addDays(30))->plainTextToken;
+        $token = $user->createToken($tokenName, ['*'], now()->addHours(1))->plainTextToken;
 
         // Issue a refresh token so the client can call POST /auth/refresh
         // before the access token expires. Stored hashed; only the plaintext
@@ -566,7 +566,7 @@ class AuthController extends Controller
             'access_token' => $token,
             'refresh_token' => $refreshPlain,
             'token_type' => 'Bearer',
-            'expires_in' => 2592000, // 30 days, matches addDays(30) above
+            'expires_in' => 3600, // 1 giờ — access token ngắn hạn; client tự gọi /auth/refresh
             'user' => [
                 'id' => $user->id,
                 'name' => $user->name,
@@ -626,7 +626,7 @@ class AuthController extends Controller
         ];
 
         if (config('otp.dev_return_code')) {
-            $payload['dev_otp_code'] = $otp->code;
+            $payload['dev_otp_code'] = $otp->plainCode ?? $otp->code;
         }
 
         return response()->json($payload);

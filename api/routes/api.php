@@ -15,6 +15,7 @@ use App\Http\Controllers\AiController;
 use App\Http\Controllers\ApiKeyController;
 use App\Http\Controllers\ExternalApiController;
 use App\Http\Controllers\UpcomingExpenseController;
+use App\Http\Controllers\SpendingInsightController;
 use App\Http\Controllers\NotificationController;
 use App\Http\Controllers\BiometricController;
 use App\Http\Controllers\BiometricChallengeController;
@@ -135,6 +136,13 @@ Route::middleware('auth:sanctum')->prefix('debts-loans')->group(function () {
     Route::post('{id}', [DebtLoanController::class, 'update']);
     Route::delete('{id}', [DebtLoanController::class, 'destroy']);
     Route::post('{id}/settle', [DebtLoanController::class, 'settle']);
+});
+
+// Cảnh báo chi tiêu bất thường
+Route::middleware('auth:sanctum')->prefix('insights')->group(function () {
+    Route::get('', [SpendingInsightController::class, 'index']);
+    Route::post('scan', [SpendingInsightController::class, 'scan']);
+    Route::post('{id}/dismiss', [SpendingInsightController::class, 'dismiss']);
 });
 
 // Auth-required: PIN change with email-OTP gate (5min code, 3/day limit)

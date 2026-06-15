@@ -52,13 +52,17 @@ class OtpService
         $max = (10 ** $length) - 1;
         $code = str_pad((string) random_int(0, $max), $length, '0', STR_PAD_LEFT);
 
-        return Otp::create([
+        $otp = Otp::create([
             'user_id' => $user->id,
-            'code' => $code,
+            // CHỈ lưu HASH của mã, không lưu mã rõ trong DB.
+            'code' => hash('sha256', $code),
             'purpose' => $purpose,
             'expires_at' => now()->addMinutes(self::expireMinutesFor($purpose)),
             'request_ip' => $ip,
         ]);
+        // Mã rõ chỉ sống trong RAM của request này — để gửi email / trả về dev.
+        $otp->plainCode = $code;
+        return $otp;
     }
 
     /**
@@ -81,7 +85,7 @@ class OtpService
     public static function send(User $user, Otp $otp): void
     {
         try {
-            Mail::to($user->email)->send(new SendOtpMail($user, $otp->code, $otp->purpose));
+            Mail::to($user->email)->send(new SendOtpMail($user, $otp->plainCode ?? $otp->code, $otp->purpose));
         } catch (\Throwable $e) {
             // Mail failure must not block dev flow — log and continue.
             Log::error('OTP mail send failed', [
@@ -122,8 +126,10 @@ class OtpService
             return false;
         }
 
-        // Constant-time string compare to avoid timing attacks
-        if (!hash_equals($otp->code, $code)) {
+        // So khớp với HASH đã lưu (constant-time). Fallback so mã rõ cho các OTP
+        // cũ tạo trước khi đổi sang hash, để không khoá người dùng đang chờ.
+        $candidate = hash('sha256', $code);
+        if (!hash_equals($otp->code, $candidate) && !hash_equals($otp->code, $code)) {
             return false;
         }
 

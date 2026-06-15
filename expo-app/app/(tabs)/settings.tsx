@@ -165,11 +165,22 @@ export default function SettingsScreen() {
           icon="finger-print-outline"
           iconBg="rgba(189,232,62,0.18)"
           iconColor={Colors.primaryDark}
-          title="Sinh trắc học"
-          subtitle={bioSubtitle}
+          title="Vân tay"
+          subtitle={fingerEnrolled ? 'Đang bật — đăng nhập bằng vân tay' : 'Bật đăng nhập nhanh bằng vân tay'}
           onPress={() => {
             haptic.light();
-            router.push('/biometric/setup');
+            router.push('/fingerprint/setup' as any);
+          }}
+        />
+        <Tile
+          icon="happy-outline"
+          iconBg="rgba(59,130,246,0.12)"
+          iconColor={Colors.info}
+          title="Khuôn mặt"
+          subtitle="Quét và lưu khuôn mặt bằng camera của app"
+          onPress={() => {
+            haptic.light();
+            router.push('/face/scan' as any);
           }}
         />
         <Tile

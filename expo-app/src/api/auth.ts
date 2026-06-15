@@ -6,6 +6,7 @@ import axios from 'axios';
 // Backend response shapes (match Laravel AuthController)
 interface LoginSuccess {
   access_token: string;
+  refresh_token?: string;
   token_type: 'Bearer';
   expires_in: number;
   user: { id: string | number; name: string; email: string };
@@ -52,6 +53,7 @@ function laravelErrorMessage(err: unknown, fallback: string): string {
 async function persistAuth(payload: LoginSuccess): Promise<User> {
   await secureStorage.saveTokens({
     accessToken: payload.access_token,
+    refreshToken: payload.refresh_token ?? null,
     expiry: new Date(Date.now() + (payload.expires_in ?? 1800) * 1000),
   });
   await secureStorage.saveUserInfo({

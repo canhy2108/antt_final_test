@@ -29,6 +29,18 @@ import { verifyPin as checkPinHash, needsRehash, hashPin } from '@/utils/pinCryp
  */
 type Phase = 'biometric-scan' | 'pin-entry' | 'verified';
 
+/**
+ * Khoá lũy tiến chống dò PIN. Dưới 5 lần sai: không khoá. Từ lần 5 trở đi
+ * khoá tạm và tăng dần thời gian.
+ */
+function pinLockDelayMs(failCount: number): number {
+  if (failCount < 5) return 0;
+  if (failCount === 5) return 30_000; // 30 giây
+  if (failCount === 6) return 60_000; // 1 phút
+  if (failCount === 7) return 5 * 60_000; // 5 phút
+  return 15 * 60_000; // 15 phút cho lần thứ 8+
+}
+
 export default function BiometricLockScreen() {
   const [cap, setCap] = useState<BiometricCapability | null>(null);
   const [phase, setPhase] = useState<Phase>('biometric-scan');
@@ -101,6 +113,17 @@ export default function BiometricLockScreen() {
 
   async function verifyPin() {
     if (busy || pinInput.length !== 6) return;
+
+    // Chống dò: nếu đang bị khoá tạm thì chặn, không kiểm tra PIN.
+    const guard = await secureStorage.getPinGuard();
+    const now = Date.now();
+    if (guard.lockUntil > now) {
+      const secs = Math.ceil((guard.lockUntil - now) / 1000);
+      setPinError(`Quá nhiều lần sai. Thử lại sau ${secs}s`);
+      setPinInput('');
+      return;
+    }
+
     setBusy(true);
     setPinError(null);
     try {
@@ -122,12 +145,22 @@ export default function BiometricLockScreen() {
             // Best-effort migration; failing to upgrade is not a fatal unlock error.
           }
         }
+        await secureStorage.clearPinGuard();
         haptic.success();
         setPhase('verified');
         setTimeout(() => router.replace('/(tabs)'), 600);
       } else {
+        // Sai PIN → tăng bộ đếm + khoá lũy tiến.
+        const count = guard.count + 1;
+        const delay = pinLockDelayMs(count);
+        const until = delay ? Date.now() + delay : 0;
+        await secureStorage.setPinGuard(count, until);
         haptic.warning();
-        setPinError('Mã PIN không đúng');
+        setPinError(
+          delay
+            ? `Sai PIN ${count} lần. Tạm khoá ${Math.round(delay / 1000)}s`
+            : 'Mã PIN không đúng',
+        );
         setPinInput('');
       }
     } catch (err) {

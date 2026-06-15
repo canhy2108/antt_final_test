@@ -1,5 +1,6 @@
 import * as SecureStore from 'expo-secure-store';
 import AsyncStorage from '@react-native-async-storage/async-storage';
+import * as Crypto from 'expo-crypto';
 import { Platform } from 'react-native';
 
 /**
@@ -16,15 +17,10 @@ import { Platform } from 'react-native';
 const KEY = 'device_fingerprint_v1';
 
 function randomFingerprint(): string {
-  // 16 bytes (128 bits) → 32 hex chars. Sufficiently unique for the server's
-  // (user, fp, kind) unique key without leaking IDFV / ANDROID_ID raw.
-  const bytes = new Uint8Array(16);
-  if (typeof crypto !== 'undefined' && typeof crypto.getRandomValues === 'function') {
-    crypto.getRandomValues(bytes);
-  } else {
-    // RN 0.81+ ships Web Crypto on global; fallback only for older RN.
-    for (let i = 0; i < bytes.length; i++) bytes[i] = Math.floor(Math.random() * 256);
-  }
+  // 16 bytes (128 bits) → 32 hex chars. LUÔN dùng CSPRNG: expo-crypto
+  // getRandomBytes có sẵn trên mọi nền tảng (iOS/Android/web) — đã bỏ hẳn
+  // nhánh `Math.random()` không an toàn của bản cũ.
+  const bytes = Crypto.getRandomBytes(16);
   let hex = '';
   for (let i = 0; i < bytes.length; i++) hex += bytes[i].toString(16).padStart(2, '0');
   return hex;

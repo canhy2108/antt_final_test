@@ -81,22 +81,26 @@ async function persistAuth(payload: ServerLoginResponse): Promise<User> {
 }
 
 /**
- * Decide which device-bound credential to use for a unified biometric login.
+ * Decide which device-bound credential to use for login.
  *
- * Normal devices only ever have one (enrolment always uses the OS's primary
- * modality). A device that enrolled on an older build may have both; in that
- * case we prefer whatever the OS reports as primary so the prompt the user
- * sees (Face ID vs fingerprint) matches the credential we're unlocking.
- * Returns null when nothing is enrolled on this device.
+ * QUAN TRỌNG: trả về kind ĐÃ THỰC SỰ đăng ký trên thiết bị (đọc từ cờ
+ * enrolment) — KHÔNG đoán lại bằng `biometricService.primaryKind()`.
+ *
+ * Vì sao (bug "mặt và vân tay đè/lẫn nhau"): primaryKind() suy ra từ
+ * supportedAuthenticationTypesAsync() = modality PHẦN CỨNG hỗ trợ, không phải
+ * cái user đăng ký. Đa số máy Android báo có cả mặt lẫn vân tay dù chỉ đăng ký
+ * vân tay, nên primaryKind() lật login sang ô 'face' trong khi credential nằm ở
+ * ô 'fingerprint' (hoặc ngược lại) → hai ô che/đè nhau. Đọc đúng cờ enrolment
+ * loại bỏ việc đoán. Sau bản vá ở enroll() bên dưới, tối đa CHỈ một cờ được bật.
  */
 async function resolveEnrolledKind(): Promise<'face' | 'fingerprint' | null> {
   const [face, finger] = await Promise.all([
     secureStorage.isFaceEnrolled(),
     secureStorage.isFingerprintEnrolled(),
   ]);
-  if (!face && !finger) return null;
-  if (face && finger) return biometricService.primaryKind();
-  return face ? 'face' : 'fingerprint';
+  if (face) return 'face';
+  if (finger) return 'fingerprint';
+  return null;
 }
 
 async function enroll(kind: 'face' | 'fingerprint', label?: string): Promise<{ credentialId: number }> {
@@ -131,10 +135,19 @@ async function enroll(kind: 'face' | 'fingerprint', label?: string): Promise<{ c
       email,
     });
 
+    // HỢP NHẤT VỀ MỘT CREDENTIAL DUY NHẤT.
+    // Sau khi lưu kind được chọn, XÓA ô đối diện (credential + cờ) để ô mặt và
+    // vân tay không bao giờ tồn tại song song và đè trạng thái của nhau. Đây là
+    // bản vá cốt lõi cho bug "quét vân tay và mặt bị trùng / ghi đè": cửa sổ OS
+    // chấp nhận đúng thứ user đã đăng ký nên một ô là đủ.
     if (kind === 'face') {
       await secureStorage.setFaceEnrolled(true);
+      await secureKeystore.deleteBioCredential('fingerprint');
+      await secureStorage.setFingerprintEnrolled(false);
     } else {
       await secureStorage.setFingerprintEnrolled(true);
+      await secureKeystore.deleteBioCredential('face');
+      await secureStorage.setFaceEnrolled(false);
     }
     await secureStorage.setBiometricEnabled(true);
     return { credentialId: res.data.credential_id };
@@ -189,18 +202,18 @@ async function login(kind: 'face' | 'fingerprint'): Promise<{ user: User; matche
 
 export const biometricApi = {
   /**
-   * Unified enrolment — Task 2.
+   * Enrol a device-bound biometric credential.
    *
-   * The caller NEVER picks face-vs-fingerprint. We read the device's primary
-   * modality (`biometricService.primaryKind()`) and bind a single device
-   * credential. Exactly ONE OS biometric prompt fires (inside the Keystore
-   * save). The caller MUST have re-verified the account owner by password
-   * before calling this — the OS prompt proves "device owner present", the
-   * password proved "account owner".
+   * `kind` is now EXPLICIT: trang vân tay truyền 'fingerprint', trang khuôn mặt
+   * truyền 'face'. Bỏ trống thì fallback về modality chính của máy. Đăng ký một
+   * loại sẽ tự xóa ô loại còn lại (xem `enroll()`), nên hai loại không bao giờ
+   * đè nhau. Đúng MỘT cửa sổ sinh trắc của OS bật (bên trong lúc lưu Keystore).
    */
-  async enrollBiometric(label?: string): Promise<{ credentialId: number; kind: 'face' | 'fingerprint' }> {
-    const kind = await biometricService.primaryKind();
-    const res = await enroll(kind, label ?? `bio:${kind}`);
+  async enrollBiometric(
+    opts: { kind?: 'face' | 'fingerprint'; label?: string } = {},
+  ): Promise<{ credentialId: number; kind: 'face' | 'fingerprint' }> {
+    const kind = opts.kind ?? (await biometricService.primaryKind());
+    const res = await enroll(kind, opts.label ?? `bio:${kind}`);
     return { credentialId: res.credentialId, kind };
   },
 

@@ -24,6 +24,7 @@ const KEYS = {
   bioCredFinger: 'bio_cred_finger_v2',
   privacyMode: 'privacy_mode',
   pinHash: 'pin_hash',
+  pinGuard: 'pin_guard',
   lastActiveAt: 'last_active_at',
 };
 
@@ -42,17 +43,6 @@ async function getItem(key: string): Promise<string | null> {
 async function deleteItem(key: string) {
   if (isWeb) return AsyncStorage.removeItem(key);
   return SecureStore.deleteItemAsync(key);
-}
-
-export interface BioCredential {
-  credentialId: number;
-  bioToken: string;
-  expiresAt: string | null;
-  email: string;
-}
-
-function bioKey(kind: 'face' | 'fingerprint'): string {
-  return kind === 'face' ? KEYS.bioCredFace : KEYS.bioCredFinger;
 }
 
 export const secureStorage = {
@@ -84,37 +74,12 @@ export const secureStorage = {
   },
 
   /**
-   * Persist a server-issued bio credential, keyed by kind. The value is
-   * kept in Keychain/Keystore so OS-level access protection covers it.
-   * On RN/Expo we don't currently set `requireAuthentication` (it forces
-   * an extra OS prompt and was not used previously); the OS biometric
-   * prompt is done explicitly via `expo-local-authentication` before
-   * each retrieval, see biometricApi.loginByBiometric.
+   * NOTE: bio_token KHÔNG bao giờ lưu ở đây. Nó chỉ nằm trong `secureKeystore`
+   * với `requireAuthentication: true`, nên mỗi lần đọc đều bị khóa bởi cửa sổ
+   * sinh trắc của OS. Các helper ungated cũ (saveBioCredential/getBioCredential)
+   * là code chết + lỗ hổng replay token → đã gỡ. `clearAllBioCredentials` giữ
+   * lại để xóa entry v2 còn sót từ bản cũ khi đăng xuất.
    */
-  async saveBioCredential(kind: 'face' | 'fingerprint', payload: BioCredential): Promise<void> {
-    await setItem(bioKey(kind), JSON.stringify(payload));
-  },
-
-  async getBioCredential(kind: 'face' | 'fingerprint'): Promise<BioCredential | null> {
-    const raw = await getItem(bioKey(kind));
-    if (!raw) return null;
-    try {
-      const parsed = JSON.parse(raw);
-      if (
-        typeof parsed?.credentialId === 'number' &&
-        typeof parsed?.bioToken === 'string' &&
-        typeof parsed?.email === 'string'
-      ) {
-        return parsed as BioCredential;
-      }
-    } catch {}
-    return null;
-  },
-
-  async clearBioCredential(kind: 'face' | 'fingerprint'): Promise<void> {
-    await deleteItem(bioKey(kind));
-  },
-
   async clearAllBioCredentials(): Promise<void> {
     await deleteItem(KEYS.bioCredFace);
     await deleteItem(KEYS.bioCredFinger);
@@ -150,6 +115,24 @@ export const secureStorage = {
   getPinHash: () => getItem(KEYS.pinHash),
   /** Force-write a pre-computed stored value. Used by the legacy migration path. */
   writeRawPinHash: (stored: string) => setItem(KEYS.pinHash, stored),
+
+  /**
+   * Trạng thái chống dò PIN: số lần sai liên tiếp + mốc thời gian bị khoá (ms).
+   * Dùng cho khoá lũy tiến ở màn nhập PIN (chống brute-force online).
+   */
+  async getPinGuard(): Promise<{ count: number; lockUntil: number }> {
+    const raw = await getItem(KEYS.pinGuard);
+    if (!raw) return { count: 0, lockUntil: 0 };
+    try {
+      const p = JSON.parse(raw);
+      return { count: Number(p?.count) || 0, lockUntil: Number(p?.lockUntil) || 0 };
+    } catch {
+      return { count: 0, lockUntil: 0 };
+    }
+  },
+  setPinGuard: (count: number, lockUntil: number) =>
+    setItem(KEYS.pinGuard, JSON.stringify({ count, lockUntil })),
+  clearPinGuard: () => deleteItem(KEYS.pinGuard),
 
   updateLastActive: () => setItem(KEYS.lastActiveAt, new Date().toISOString()),
   async isSessionTimedOut(timeoutMinutes = 30) {
